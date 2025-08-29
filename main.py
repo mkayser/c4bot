@@ -22,6 +22,16 @@ def change_space(old_space, _param):
 ### End supersuit stuff
 
 
+### Helper function to get legal moves
+def get_legal_moves(obs, info=None, action_space_n=7):
+    if info and "legal_moves" in info:
+        return list(info["legal_moves"])  # works for some envs, not C4
+    if isinstance(obs, dict) and "action_mask" in obs:
+        return [i for i, ok in enumerate(obs["action_mask"]) if ok]
+    return list(range(action_space_n))
+
+
+
 env = connect_four_v3.env(render_mode="ansi")  # text render, no pygame window
 env = observation_lambda_v0(env, change_obs, change_space)
 
@@ -29,12 +39,13 @@ env = observation_lambda_v0(env, change_obs, change_space)
 env.reset(seed=0)
 for agent in env.agent_iter():
     obs, reward, term, trunc, info = env.last()
-    utils.jprint("obs", obs)
-    utils.jprint("reward", reward)
     if term or trunc:
         action = None
+        print(f"Agent: {agent}  Reward: {reward}  Term: {term}  Trunc: {trunc}")
     else:
-        print("Env info: {}".format(env.infos[agent]))
-        legal = env.infos[agent]["legal_moves"]
+        legal = get_legal_moves(obs, info)
+        print(f"obs[observation].shape: {obs["observation"].shape}")
+        print(f"Agent: {agent}  Reward: {reward}  Legal: {legal}")
         action = legal[0]  # replace with your policy / DQN / PPO action
+        print(f"   Action: {action}")
     env.step(action)
