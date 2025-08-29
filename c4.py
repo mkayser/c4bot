@@ -3,7 +3,8 @@ from supersuit import dtype_v0, normalize_obs_v0, observation_lambda_v0
 from gymnasium import spaces
 import numpy as np
 import utils
-import agents
+from agents import C4Agent
+from typing import Any, Dict, List, Optional
 
 
 ### Supersuit stuff for properly presenting the game state
@@ -35,7 +36,30 @@ def get_legal_moves(obs, info=None, action_space_n=7):
 def initialize_env():
     env = connect_four_v3.env(render_mode="ansi")  # text render, no pygame window
     env = observation_lambda_v0(env, change_obs, change_space)
+
+    print("render_mode seen by wrapper:", getattr(env, "render_mode", None))
+    try:
+        print("base render_mode:", env.unwrapped.render_mode)
+        print("supported modes:", getattr(env.unwrapped, "metadata", {}).get("render_modes"))
+    except Exception:
+        pass
     return env
+
+def c4_ansi_from_obs(obs) -> str:
+    arr = obs["observation"]
+    if arr.shape == (2, 6, 7):
+        me, opp = arr[0], arr[1]
+    elif arr.shape == (6, 7, 2):
+        me, opp = arr[...,0], arr[...,1]
+    else:
+        raise ValueError(f"Unexpected obs shape {arr.shape}")
+
+    grid = me.astype(np.int8) - opp.astype(np.int8)  # +1 me, -1 opp
+    sym = {0: ".", 1: "X", -1: "O"}
+    lines = []
+    for r in range(5, -1, -1):  # show top row first
+        lines.append("| " + " ".join(sym[int(grid[r, c])] for c in range(7)) + " |")
+    return "\n".join(lines + ["  0 1 2 3 4 5 6"])
 
 
 def play_game(
@@ -63,10 +87,10 @@ def play_game(
     agent1.start_game(P1)
 
     move_count = 0
-    if render:
-        s = env.render()
-        if isinstance(s, str):
-            print(s)
+    #if render:
+    #    s = env.render()
+    #    if isinstance(s, str):
+    #        print(s)
 
     for agent_id in env.agent_iter():
         obs, reward, term, trunc, info = env.last()
@@ -78,16 +102,17 @@ def play_game(
             env.step(None)  # must pass None when an agent is done
             continue
 
-        legal = legal_from_obs(obs)
+        legal = get_legal_moves(obs, info)
         action = id_to_agent[agent_id].act(obs, legal, reward, term, trunc, info)
         assert action in legal, f"{id_to_agent[agent_id].name} chose illegal move {action}"
         env.step(int(action))
         move_count += 1
 
         if render:
-            s = env.render()
+            s = c4_ansi_from_obs(obs)
             if isinstance(s, str):
                 print(s)
+                print("\n")
 
     # After the loop, PettingZoo has final per-agent rewards in env.rewards
     rewards = dict(env.rewards)

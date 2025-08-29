@@ -1,5 +1,6 @@
 import numpy as np
-
+from abc import ABC, abstractmethod
+from typing import Optional, Any, List, Dict
 
 class C4Agent(ABC):
     """Minimal interface for a PettingZoo Connect 4 agent."""
