@@ -8,7 +8,7 @@ env = c4.initialize_env()
 a0 = agents.RandomC4Agent()
 a1 = agents.RandomC4Agent()
 
-results = c4.play_game(env, a0, a1, render=True)
+results = c4.play_game(env, a0, a1, render=True, verbose=True)
 
 
 print("rewards={}\nwinner={}\nmoves={}".format(

@@ -87,16 +87,16 @@ def play_game(
     agent1.start_game(P1)
 
     move_count = 0
-    #if render:
-    #    s = env.render()
-    #    if isinstance(s, str):
-    #        print(s)
+    rewards = {P0: 0.0, P1: 0.0}
 
     for agent_id in env.agent_iter():
         obs, reward, term, trunc, info = env.last()
 
         if verbose:
             print(f"[turn] {agent_id} reward={reward} term={term} trunc={trunc}")
+
+        # accumulate per-step reward for the agent whose turn this is
+        rewards[agent_id] += float(reward)
 
         if term or trunc:
             env.step(None)  # must pass None when an agent is done
@@ -105,24 +105,25 @@ def play_game(
         legal = get_legal_moves(obs, info)
         action = id_to_agent[agent_id].act(obs, legal, reward, term, trunc, info)
         assert action in legal, f"{id_to_agent[agent_id].name} chose illegal move {action}"
+
         env.step(int(action))
         move_count += 1
 
         if render:
-            s = c4_ansi_from_obs(obs)
-            if isinstance(s, str):
-                print(s)
-                print("\n")
+            next_agent = env.agent_selection               # who moves next
+            next_obs = env.observe(next_agent)             # AEC API: get obs for any agent
+            print(c4_ansi_from_obs(next_obs))
+            print(f"\nAction: {action}\n")
 
-    # After the loop, PettingZoo has final per-agent rewards in env.rewards
-    rewards = dict(env.rewards)
-    if rewards.get("player_0", 0) > rewards.get("player_1", 0):
-        winner = "player_0"
-    elif rewards.get("player_1", 0) > rewards.get("player_0", 0):
-        winner = "player_1"
+
+    r0, r1 = rewards[P0], rewards[P1]
+    if r0 > r1:
+        winner = P0
+    elif r1 > r0:
+        winner = P1
     else:
         winner = "draw"
-
+        
     # Notify agents (optional)
     agent0.end_game(rewards, info={})
     agent1.end_game(rewards, info={})
