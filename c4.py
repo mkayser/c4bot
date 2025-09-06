@@ -3,7 +3,6 @@ from supersuit import dtype_v0, normalize_obs_v0, observation_lambda_v0
 from gymnasium import spaces
 import numpy as np
 import utils
-import c4gamerecord
 from agents import Agent
 from typing import Optional, NamedTuple, Dict, Tuple, Any, List, Union
 
@@ -21,6 +20,27 @@ class Transition(NamedTuple):
     s2: np.ndarray
     mask: Optional[np.ndarray] = None
     mask2: Optional[np.ndarray] = None
+
+
+class C4GameRoles():
+    P0 = 'player_0'
+    P1 = 'player_1'
+
+class C4GameRecord():    
+    def __init__(self, metadata = {}):
+        self.moves = []
+        self.metadata = metadata
+        self.winner = None
+
+    def add_move(self, move_id):
+        self.moves.append(move_id)
+
+    def set_winner(self, player_id):
+        if player_id == C4GameRoles.P0 or player_id == C4GameRoles.P1:
+            self.winner = player_id
+        else:
+            self.winner = 'draw'
+        
 
 
 
@@ -86,9 +106,9 @@ def play_game(
 ) -> Tuple[Any]:
     """
     Runs one game in the given PettingZoo env (already constructed; we just reset it).
-    Returns a dict with rewards, winner, and move count.
-    Saves each move in a C4GameRecord object (incomplete; no per-agent info yet).
-    Agents must implement the C4Agent interface.
+    Returns a record of the game, as well as a list of Transition's from each agent perspective.
+    Saves each move in a C4GameRecord object.
+    Agents must implement the Agent interface.
     """
 
     env.reset()
@@ -99,14 +119,15 @@ def play_game(
         print()
 
     # Map PettingZoo agent ids to our agents
-    P0 = "player_0"
-    P1 = "player_1"
+    P0 = C4GameRoles.P0
+    P1 = C4GameRoles.P1
     
     id_to_agent = {P0: agent0, P1: agent1}
 
     # Start recording
-    record = c4gamerecord.C4GameRecord({P0: agent0.name, P1: agent1.name})
+    record = C4GameRecord({P0: agent0.name, P1: agent1.name})
 
+    # Notify agents of game start
     agent0.start_game(P0)
     agent1.start_game(P1)
 
@@ -169,6 +190,7 @@ def play_game(
             print(f"\nAction: {action}\n")
 
 
+    # Game over; determine winner
     r0, r1 = rewards[P0], rewards[P1]
     if r0 > r1:
         record.set_winner(P0)
@@ -177,7 +199,7 @@ def play_game(
     else:
         record.set_winner("draw")
         
-    # Notify agents (optional)
+    # Notify agents of game end
     agent0.end_game()
     agent1.end_game()
 
