@@ -1,38 +1,61 @@
 import numpy as np
 from abc import ABC, abstractmethod
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Protocol
 
-class C4Agent(ABC):
-    """Minimal interface for a PettingZoo Connect 4 agent."""
 
-    def __init__(self, name: Optional[str] = None, seed: Optional[int] = None):
-        self.name = name or self.__class__.__name__
-        self.rng = np.random.default_rng(seed)
-        self.player_id: Optional[str] = None  # "player_0" or "player_1"
-
-    def start_game(self, player_id: str):
-        """Called once at the start of each game to (re)initialize agent state."""
-        self.player_id = player_id
-
-    @abstractmethod
-    def act(
-        self,
-        obs: Any,                 # PettingZoo observation (usually Dict)
-        legal_moves: List[int],   # computed from action_mask
-        reward: float,            # reward since this agent last acted
-        terminated: bool,
-        truncated: bool,
-        info: Dict[str, Any],
-    ) -> Optional[int]:
-        """Return the chosen action (column 0..6). Return None if terminated/truncated."""
-        raise NotImplementedError
-
-    def end_game(self, final_rewards: Dict[str, float], info: Dict[str, Any]):
-        """Optional: inspect outcome, update learning, etc."""
-        pass
+class Agent(Protocol):
+    def start_game(self, player_id: str) -> None: ...
+    def act(self, s:np.ndarray, action_mask: np.ndarray) -> int: ...
+    # No training inside the agent; pure selector.
+    def end_game(self) -> None: ...
+    def name(self) -> str:
+        return self.__class__.__name__
 
 
 # --- A trivial baseline agent ------------------------------------------------
-class RandomC4Agent(C4Agent):
-    def act(self, obs, legal_moves, reward, terminated, truncated, info):
-        return None if (terminated or truncated) else int(self.rng.choice(legal_moves))
+class RandomAgent(Agent):
+    def __init__(self, seed: Optional[int] = None):
+        self.rng = np.random.default_rng(seed)
+
+    def start_game(self, player_id: str) -> None:
+        pass
+          
+    def act(self, obs: np.ndarray, action_mask: np.ndarray):
+        # choose uniformly among mask-positive moves
+        legal_moves = np.flatnonzero(action_mask)
+        chosen_move = self.rng.choice(legal_moves)
+        return int(chosen_move)
+    
+    def end_game(self) -> None:
+        pass
+
+
+class ActionPickers():
+    def epsilon_greedy(epsilon: float, rng: np.random.Generator):
+        return lambda scores: (
+            int(rng.choice(np.flatnonzero(scores == np.max(scores))))
+            if rng.random() > epsilon
+            else int(rng.choice(len(scores)))
+        )
+    
+    def softmax(temperature: float, rng: np.random.Generator):
+        return lambda scores: (
+            int(rng.choice(len(scores), p=np.exp(scores / temperature) / np.sum(np.exp(scores / temperature))))
+        )
+
+class QAgent(Agent):
+    def __init__(self, qfunction: Any, action_picker: Any):
+        self.qfunction = qfunction
+        self.action_picker = action_picker
+
+    def start_game(self, player_id: str) -> None:
+        pass
+          
+    def act(self, obs: np.ndarray, action_mask: np.ndarray):
+        scores = self.qfunction(obs)
+        masked_scores = np.where(action_mask, scores, -np.inf)
+        chosen_move = self.action_picker(masked_scores)
+        return int(chosen_move)
+    
+    def end_game(self) -> None:
+        pass
