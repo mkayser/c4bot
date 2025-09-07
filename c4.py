@@ -10,7 +10,7 @@ from typing import Optional, NamedTuple, Dict, Tuple, Any, List, Union
 class IncompleteTransition(NamedTuple):
     s: np.ndarray
     a: int
-    mask: Optional[np.ndarray] = None
+    mask: np.ndarray
 
 # Transition tuple for experience replay
 class Transition(NamedTuple):
@@ -18,8 +18,8 @@ class Transition(NamedTuple):
     a: int
     r: float
     s2: np.ndarray
-    mask: Optional[np.ndarray] = None
-    mask2: Optional[np.ndarray] = None
+    mask: np.ndarray
+    mask2: np.ndarray
 
 
 class C4GameRoles():
@@ -107,7 +107,6 @@ def play_game(
     """
     Runs one game in the given PettingZoo env (already constructed; we just reset it).
     Returns a record of the game, as well as a list of Transition's from each agent perspective.
-    Saves each move in a C4GameRecord object.
     Agents must implement the Agent interface.
     """
 
