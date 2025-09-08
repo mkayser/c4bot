@@ -30,18 +30,19 @@ class RandomAgent(Agent):
         pass
 
 
-class ActionPickers():
-    def epsilon_greedy(epsilon: float, rng: np.random.Generator):
-        return lambda scores: (
-            int(rng.choice(np.flatnonzero(scores == np.max(scores))))
-            if rng.random() > epsilon
-            else int(rng.choice(len(scores)))
-        )
-    
-    def softmax(temperature: float, rng: np.random.Generator):
-        return lambda scores: (
-            int(rng.choice(len(scores), p=np.exp(scores / temperature) / np.sum(np.exp(scores / temperature))))
-        )
+def make_epsilon_greedy(epsilon: float, rng: np.random.Generator):
+    def _epsilon_greedy(scores, *, mask=None) -> int:
+        scores = np.asarray(scores)
+        legal_idx = np.flatnonzero(mask)
+        if not legal_idx.size:
+            raise ValueError("No legal actions available.")
+        if rng.random() < epsilon:
+            return int(rng.choice(legal_idx))
+        legal_scores = scores[legal_idx]
+        best = np.flatnonzero(legal_scores == legal_scores.max())
+        return int(legal_idx[rng.choice(best)])
+    return _epsilon_greedy
+
 
 class QAgent(Agent):
     def __init__(self, qfunction: Any, action_picker: Any):
@@ -52,9 +53,8 @@ class QAgent(Agent):
         pass
           
     def act(self, obs: np.ndarray, action_mask: np.ndarray):
-        scores = self.qfunction(obs)
-        masked_scores = np.where(action_mask, scores, -np.inf)
-        chosen_move = self.action_picker(masked_scores)
+        scores : np.ndarray = self.qfunction.scores(obs)
+        chosen_move = self.action_picker(scores, mask=action_mask)
         return int(chosen_move)
     
     def end_game(self) -> None:

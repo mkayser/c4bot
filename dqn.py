@@ -1,10 +1,10 @@
+from __future__ import annotations
 import numpy as np
 import c4
 from typing import Protocol, Optional, NamedTuple, Dict, List, Any, Tuple
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from __future__ import annotations
 
 
 #class Observation(NamedTuple):
@@ -58,7 +58,7 @@ class ConvNetQFunction(nn.Module):
         return self.net(x)
 
     @torch.no_grad()
-    def act(self, s: np.ndarray) -> np.ndarray:
+    def scores(self, s: np.ndarray) -> np.ndarray:
         # Convenience inference helper
         self.eval()
         x = torch.from_numpy(s).float().unsqueeze(0).to(self.device_)  # (1,C,H,W)
@@ -117,7 +117,6 @@ class TransitionReplayBuffer:
 class VanillaDQNTrainer(Trainer):
     def __init__(self, 
                  qfunction : QFunction, 
-                 action_picker : Any,
                  *, 
                  buffer_size: int = 10000,
                  train_every: int = 1,
@@ -130,7 +129,6 @@ class VanillaDQNTrainer(Trainer):
                  ):  
         self.qfunction = qfunction
         self.target_qfunction = qfunction.clone()  # Assume qfunction has a copy method
-        self.action_picker = action_picker
         self.buffer_size = buffer_size
         self.train_every = train_every
         self.min_buffer_to_train = min_buffer_to_train
@@ -156,9 +154,7 @@ class VanillaDQNTrainer(Trainer):
         pass
 
     def add_transition(self, tr: c4.Transition) -> None:
-        if len(self.replay_buffer) >= self.buffer_size:
-            self.replay_buffer.pop(0)
-        self.replay_buffer.append(tr)
+        self.replay_buffer.add(tr)
         self.step_count += 1
         if self.step_count > self.min_buffer_to_train and self.step_count % self.train_every == 0:
             self.train()
