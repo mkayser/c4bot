@@ -6,6 +6,27 @@ import numpy as np
 import torch
 
 
+class RecentScoreRingBuffer:
+    def __init__(self, size: int = 100):
+        self.size = size
+        self.buffer: List[float] = []
+        self.index = 0
+        self.sum = 0.0
+
+    def add(self, score: float) -> None:
+        if len(self.buffer) < self.size:
+            self.buffer.append(score)
+        else:
+            self.sum -= self.buffer[self.index]
+            self.sum += score
+            self.buffer[self.index] = score
+            self.index = (self.index + 1) % self.size
+
+    def average_if_full(self) -> float:
+        if len(self.buffer) < self.size:
+            return 0.0
+        return self.sum / self.size
+
 def print_transition(tr: c4.Transition) -> None:
     print(f"STATE {tr.a} {tr.r} STATE2 {tr.mask} {tr.mask2}")
 
@@ -34,14 +55,25 @@ a0 = agents.RandomAgent()
 a1 = agents.QAgent(qfunction=qfunc, action_picker=action_picker)
 
 
-num_games = 1000
+num_games = 20000
+recent_scores = RecentScoreRingBuffer(size=500)
+
 for game_idx in range(num_games):
     print(f"Starting game {game_idx+1}/{num_games}: ", end="")
     result: c4.C4GameRecord
-    trans1: c4.Transition
-    trans2: c4.Transition
+    trans1: List[c4.Transition]
+    trans2: List[c4.Transition]
     result, trans1, trans2 = c4.play_game(env, a0, a1, render=False, verbose=False)
-    print(f"Winner: {result.winner}")
+
+    # Track recent win rate for a1
+    a1_score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
+    recent_scores.add(a1_score)
+    avg_score = recent_scores.average_if_full()
+
+    # Print game result
+    print(f"Winner: {result.winner}  Recent avg score for a1: {avg_score:.3f}")
+
+
     # Feed transitions to trainer
     for tr in trans2:
         assert isinstance(tr, c4.Transition)
