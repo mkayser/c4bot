@@ -20,6 +20,7 @@ class Transition(NamedTuple):
     s2: np.ndarray
     mask: np.ndarray
     mask2: np.ndarray
+    done: bool
 
 
 class C4GameRoles():
@@ -155,7 +156,8 @@ def play_game(
                 r=r,
                 s2=s,
                 mask=last_tr.mask,
-                mask2=action_mask
+                mask2=action_mask,
+                done=term or trunc
             )
             transitions[agent_id][-1] = tr
 

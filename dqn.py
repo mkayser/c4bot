@@ -5,6 +5,8 @@ from typing import Protocol, Optional, NamedTuple, Dict, List, Any, Tuple
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
+import copy
 
 
 #class Observation(NamedTuple):
@@ -31,6 +33,8 @@ class QFunction(Protocol):
     def __call__(self, s: np.ndarray) -> np.ndarray: ...
     def clone(self) -> 'QFunction': ...
 
+
+#class ToyQFunction:
 
 class ConvNetQFunction(nn.Module):
     def __init__(self, input_shape: Tuple[int, ...], num_actions: int, device: torch.device | str = "cpu"):
@@ -94,6 +98,7 @@ class TransitionReplayBuffer:
         self.s2 = np.empty((capacity, *obs_shape), dtype=dtype_obs)
         self.mask = np.empty((capacity, num_actions), dtype=np.float32)
         self.mask2 = np.empty((capacity, num_actions), dtype=np.float32)
+        self.done = np.empty((capacity,), dtype=bool)
         self.size = 0
         self.next = 0
 
@@ -105,13 +110,75 @@ class TransitionReplayBuffer:
         self.s2[i] = tr.s2
         self.mask[i]  = tr.mask
         self.mask2[i] = tr.mask2
+        self.done[i] = tr.done
         self.next = (i + 1) % self.capacity
         if self.size < self.capacity:
             self.size += 1
 
     def sample(self, batch_size):
         idx = np.random.randint(0, self.size, size=batch_size)
-        return self.s[idx], self.a[idx], self.r[idx], self.s2[idx], self.mask[idx], self.mask2[idx]
+        return self.s[idx], self.a[idx], self.r[idx], self.s2[idx], self.mask[idx], self.mask2[idx], self.done[idx]
+
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+
+def log_dqn_metrics(*, step: int,
+                q_sa: torch.Tensor,        # [B]
+                target_y: torch.Tensor,    # [B]
+                q_values: torch.Tensor,    # [B, A] from online net
+                mask: torch.Tensor | None, # [B, A] bool (True = legal) or None
+                q_net: torch.nn.Module,
+                writer: SummaryWriter,
+                grad_clip_max: float | None = None,
+                replay=None,               # optional: must expose sample(..., with_age=True)
+                tag_prefix: str = "train"):
+    # --- TD loss & error percentiles ---
+    with torch.no_grad():
+        td_err = (q_sa - target_y).detach().cpu().numpy()
+        td_abs = np.abs(td_err)
+        td_loss = float(F.smooth_l1_loss(q_sa, target_y).item())
+        writer.add_scalar(f"{tag_prefix}/td_loss", td_loss, step)
+        for p, val in zip([50, 90, 99], np.percentile(td_abs, [50, 90, 99])):
+            writer.add_scalar(f"{tag_prefix}/td_error_p{p}", float(val), step)
+
+    # --- Q-value stats over legal actions only ---
+    with torch.no_grad():
+        q = q_values
+        if mask is not None:
+            q = q.masked_fill(~mask, float("nan"))
+        q_np = q.detach().cpu().numpy()
+        writer.add_scalar(f"{tag_prefix}/q_mean", np.nanmean(q_np), step)
+        writer.add_scalar(f"{tag_prefix}/q_std",  np.nanstd(q_np),  step)
+        writer.add_scalar(f"{tag_prefix}/q_min",  np.nanmin(q_np),  step)
+        writer.add_scalar(f"{tag_prefix}/q_max",  np.nanmax(q_np),  step)
+
+        # Fraction of illegal greedy actions (pre-mask)
+        greedy = q_values.argmax(dim=1)  # indices ignoring mask
+        if mask is not None:
+            rows = torch.arange(q_values.size(0), device=q_values.device)
+            frac_illegal = (~mask[rows, greedy]).float().mean().item()
+            writer.add_scalar(f"{tag_prefix}/frac_illegal_greedy", frac_illegal, step)
+
+    # --- Gradient norm (optionally also clip here) ---
+    total_norm = torch.nn.utils.clip_grad_norm_(q_net.parameters(),
+                                                grad_clip_max) if grad_clip_max else \
+                 torch.linalg.vector_norm(
+                     torch.stack([p.grad.detach().norm() for p in q_net.parameters()
+                                  if p.grad is not None]), ord=2).item()
+    writer.add_scalar(f"{tag_prefix}/grad_norm", float(total_norm), step)
+
+    # --- Replay age distribution (if available) ---
+    if replay is not None and getattr(replay, "sample", None):
+        try:
+            _, ages = replay.sample(64, with_age=True)  # returns (batch, ages)
+            ages = np.asarray(ages, dtype=np.int64)
+            writer.add_scalar(f"{tag_prefix}/replay_age_mean", ages.mean(), step)
+            for p, val in zip([10, 50, 90], np.percentile(ages, [10, 50, 90])):
+                writer.add_scalar(f"{tag_prefix}/replay_age_p{p}", float(val), step)
+        except TypeError:
+            pass  # buffer doesn't support with_age
 
 
 class VanillaDQNTrainer(Trainer):
@@ -125,20 +192,35 @@ class VanillaDQNTrainer(Trainer):
                  gamma: float = 0.99,
                  target_update_every: int = 100,
                  optimizer: Optional[torch.optim.Optimizer] = None,
-                 learning_rate: float = 1e-3
+                 learning_rate: float = 1e-3,
+                 max_gradient_norm: float = 10.0,
+                 writer: Optional[SummaryWriter] = None,
+                 log_every: int = 100
                  ):  
         self.qfunction = qfunction
-        self.target_qfunction = qfunction.clone()  # Assume qfunction has a copy method
+
+        # Clone and freeze target network
+        self.target_qfunction = qfunction.clone()
+        self.target_qfunction.eval()
+        for p in self.target_qfunction.parameters():
+            p.requires_grad = False
+
         self.buffer_size = buffer_size
         self.train_every = train_every
         self.min_buffer_to_train = min_buffer_to_train
         self.batch_size = batch_size
         self.gamma = gamma
         self.learning_rate = learning_rate
+        self.max_gradient_norm = max_gradient_norm
         self.target_update_every = target_update_every
         self.step_count = 0
+        self.train_step_count = 0
         self.replay_buffer = TransitionReplayBuffer(buffer_size, qfunction.input_shape, qfunction.num_actions)
         self.optimizer = optimizer if optimizer is not None else optim.Adam(self.qfunction.parameters(), lr=learning_rate)
+        self.criterion = nn.SmoothL1Loss(beta=1.0, reduction='mean')
+        self.writer = writer
+        self.log_every = log_every
+
         assert self.min_buffer_to_train <= self.buffer_size
         assert self.train_every > 0
         assert self.batch_size > 0
@@ -166,32 +248,62 @@ class VanillaDQNTrainer(Trainer):
         # Only train if we have enough samples
         if self.replay_buffer.size < self.min_buffer_to_train:
             return
-                
+        
+        # Update train step count
+        self.train_step_count += 1
+
+                        
         # Sample a batch
-        s_batch, a_batch, r_batch, s2_batch, mask_batch, mask2_batch = self.replay_buffer.sample(self.batch_size)
+        s_batch, a_batch, r_batch, s2_batch, mask_batch, mask2_batch, done_batch = self.replay_buffer.sample(self.batch_size)
         s_batch = torch.from_numpy(s_batch).float().to(self.qfunction.device_)
         a_batch = torch.from_numpy(a_batch).long().to(self.qfunction.device_)
         r_batch = torch.from_numpy(r_batch).float().to(self.qfunction.device_)
         s2_batch = torch.from_numpy(s2_batch).float().to(self.qfunction.device_)
         mask2_batch = torch.from_numpy(mask2_batch).float().to(self.qfunction.device_)
+        done_batch = torch.from_numpy(done_batch).bool().to(self.qfunction.device_)
         
         # Compute Q(s,a)
         q_values = self.qfunction(s_batch)  # (B, num_actions)
         q_s_a = q_values.gather(1, a_batch.unsqueeze(1)).squeeze(1)  # (B,)
 
         # Compute target Q values
+
         with torch.no_grad():
-            q_values_next = self.target_qfunction(s2_batch)  # (B, num_actions)
+            q_next = self.target_qfunction(s2_batch)             # (B, A)
             if mask2_batch is not None:
-                q_values_next = q_values_next * mask2_batch + (1 - mask2_batch) * (-1e10)
-            max_q_s2 = q_values_next.max(1)[0]  # (B,)
-            target_q = r_batch + self.gamma * max_q_s2  # (B,)
+                mask2 = mask2_batch.to(q_next.device, dtype=q_next.dtype)
+                q_next = q_next.masked_fill(mask2 < 0.5, torch.finfo(q_next.dtype).min)
+
+            max_q_s2, _ = q_next.max(dim=1)                      # (B,)
+            target_q = r_batch + self.gamma * torch.where(
+                done_batch, torch.zeros_like(max_q_s2), max_q_s2
+            )
 
         # Compute loss
-        loss = nn.MSELoss()(q_s_a, target_q)
+        loss = self.criterion(q_s_a, target_q)
 
         # Optimize
         self.optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.qfunction.parameters(), self.max_gradient_norm)
         self.optimizer.step()
+
+        # Update target network
+        if self.train_step_count % self.target_update_every == 0:
+            self.target_qfunction.load_state_dict(self.qfunction.state_dict())  
+
+        # Logging
+        if self.writer is not None and self.train_step_count % self.log_every == 0:
+            log_dqn_metrics(
+                step=self.train_step_count,
+                q_sa=q_s_a,
+                target_y=target_q,
+                q_values=q_values,
+                mask=None, 
+                q_net=self.qfunction,
+                writer=self.writer,
+                tag_prefix="train",
+                replay=self.replay_buffer
+            )
+
         

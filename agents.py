@@ -1,6 +1,7 @@
 import numpy as np
 from abc import ABC, abstractmethod
 from typing import Optional, Any, List, Dict, Protocol
+from logger import HtmlQLLogger
 
 
 class Agent(Protocol):
@@ -45,17 +46,28 @@ def make_epsilon_greedy(epsilon: float, rng: np.random.Generator):
 
 
 class QAgent(Agent):
-    def __init__(self, qfunction: Any, action_picker: Any):
+    def __init__(self, 
+                 qfunction: Any, 
+                 action_picker: Any,
+                 logger: Optional[HtmlQLLogger] = None
+                 ):
         self.qfunction = qfunction
         self.action_picker = action_picker
+        self.logger = logger
 
     def start_game(self, player_id: str) -> None:
-        pass
+        if self.logger:
+            self.logger.start_game()
+            self.game_step = 0
           
     def act(self, obs: np.ndarray, action_mask: np.ndarray):
+        self.game_step += 1
         scores : np.ndarray = self.qfunction.scores(obs)
         chosen_move = self.action_picker(scores, mask=action_mask)
+        if self.logger:
+            self.logger.add_row(self.game_step, scores, action_mask, obs, chosen_move)
         return int(chosen_move)
     
     def end_game(self) -> None:
-        pass
+        if self.logger:
+            self.logger.end_game()
