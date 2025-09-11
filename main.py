@@ -42,18 +42,24 @@ print(f"Using device: {device}")
 env = c4.initialize_env()
 env.reset()  # Need to reset before querying spaces
 
-# Initialize Q-function and trainer
+# Initialize Q-function
 writer = SummaryWriter()  # TensorBoard writer
 qfunc = ConvNetQFunction(input_shape=env.observation_space(env.agents[0])['observation'].shape, 
                          num_actions=env.action_space(env.agents[0]).n,
                          device=device)
 
-action_picker_epsilon = utils.linear_sched(start=1.0, end=0.1, steps=100000)
+# Create action picker with epsilon schedule
+action_picker_epsilon = utils.linear_sched(start=1.0, end=0.1, steps=800000)
 action_picker = agents.EpsilonGreedyPicker(epsilon=action_picker_epsilon, 
                                            rng=np.random.default_rng(42), 
                                            writer=writer, 
                                            writer_tag_prefix="a2/epsilon")
 
+# Create purely greedy action picker for evaluation
+greedy_action_picker = agents.EpsilonGreedyPicker(epsilon=0.0, 
+                                                 rng=np.random.default_rng(43))
+
+# Initialize trainer
 trainer = VanillaDQNTrainer(qfunction=qfunc, 
                             buffer_size=10000,
                             batch_size=128,
@@ -70,11 +76,14 @@ trainer = VanillaDQNTrainer(qfunction=qfunc,
 with agents.HtmlQLLogger("game_log.html", append=False, max_games_to_write=100, game_write_interval=100) as logger:
     a1 = agents.RandomAgent()
     a2 = agents.QAgent(qfunction=qfunc, action_picker=action_picker, logger=logger)
+    a2_greedy = agents.QAgent(qfunction=qfunc, action_picker=greedy_action_picker, logger=None)
 
 
     num_games = 300000
     recent_scores = RecentScoreRingBuffer(size=500)
+    recent_scores_greedy = RecentScoreRingBuffer(size=100)
     log_winrate_every = 100
+    play_greedy_every = 5
 
     for game_idx in range(num_games):
         #print(f"Starting game {game_idx+1}/{num_games}: ", end="")
@@ -86,6 +95,14 @@ with agents.HtmlQLLogger("game_log.html", append=False, max_games_to_write=100, 
         # Track recent win rate for a1
         a2_score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
         recent_scores.add(a2_score)
+
+        # Play game with greedy a2 every log_winrate_every games
+        if (game_idx % play_greedy_every) == 0 and game_idx > 0:
+            result_greedy, _, _ = c4.play_game(env, a1, a2_greedy, render=False, verbose=False)
+            a2_score_greedy = 1.0 if result_greedy.winner == c4.C4GameRoles.P1 else 0.0
+            recent_scores_greedy.add(a2_score_greedy)
+            avg_score_greedy = recent_scores_greedy.average_if_full()
+            writer.add_scalar("game/recent_avg_score_a2_greedy", avg_score_greedy, game_idx)
 
         # Print game result
         if (game_idx % log_winrate_every) == 0 and game_idx > 0:
