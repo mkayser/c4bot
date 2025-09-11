@@ -50,42 +50,43 @@ action_picker = agents.make_epsilon_greedy(epsilon=0.15, rng=np.random.default_r
 trainer = VanillaDQNTrainer(qfunction=qfunc, 
                             buffer_size=10000,
                             batch_size=128,
+                            step_length_distribution={1: 0.5, 2: 0.3, 3: 0.2},
                             min_buffer_to_train=1000,
                             train_every=1,
-                            learning_rate=5e-4,
+                            learning_rate=1e-3,
                             target_update_every=500,
+                            max_gradient_norm=5.0,
                             gamma=0.99,
                             writer=writer)
 
 
 with agents.HtmlQLLogger("game_log.html", append=False, max_games_to_write=100, game_write_interval=100) as logger:
-    a0 = agents.RandomAgent()
-    a1 = agents.QAgent(qfunction=qfunc, action_picker=action_picker, logger=logger)
+    a1 = agents.RandomAgent()
+    a2 = agents.QAgent(qfunction=qfunc, action_picker=action_picker, logger=logger)
 
 
-    num_games = 30000
+    num_games = 300000
     recent_scores = RecentScoreRingBuffer(size=500)
-    print_result_every = 100
+    log_winrate_every = 100
 
     for game_idx in range(num_games):
         #print(f"Starting game {game_idx+1}/{num_games}: ", end="")
         result: c4.C4GameRecord
         trans1: List[c4.Transition]
         trans2: List[c4.Transition]
-        result, trans1, trans2 = c4.play_game(env, a0, a1, render=False, verbose=False)
+        result, trans1, trans2 = c4.play_game(env, a1, a2, render=False, verbose=False)
 
         # Track recent win rate for a1
-        a1_score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
-        recent_scores.add(a1_score)
-        avg_score = recent_scores.average_if_full()
+        a2_score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
+        recent_scores.add(a2_score)
 
         # Print game result
-        if (game_idx % print_result_every) == 0 and game_idx > 0:
-            print(f"{game_idx:8d} Winner: {result.winner}  Recent avg score for a1: {avg_score:.3f}")
+        if (game_idx % log_winrate_every) == 0 and game_idx > 0:
+            avg_score = recent_scores.average_if_full()
+            writer.add_scalar("game/recent_avg_score_a1", avg_score, game_idx)
+            print(f"\rGame {game_idx}/{num_games}  recent avg score a1: {avg_score:.3f}           ", end="")
 
 
         # Feed transitions to trainer
-        for tr in trans2:
-            assert isinstance(tr, c4.Transition)
-            trainer.add_transition(tr)
+        trainer.add_episode(trans2)
 

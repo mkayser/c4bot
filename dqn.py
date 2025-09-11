@@ -189,6 +189,7 @@ class VanillaDQNTrainer(Trainer):
                  train_every: int = 1,
                  min_buffer_to_train: int = 1000,
                  batch_size: int = 32,
+                 step_length_distribution: Dict[int, float] = {1: 1.0},
                  gamma: float = 0.99,
                  target_update_every: int = 100,
                  optimizer: Optional[torch.optim.Optimizer] = None,
@@ -209,6 +210,8 @@ class VanillaDQNTrainer(Trainer):
         self.train_every = train_every
         self.min_buffer_to_train = min_buffer_to_train
         self.batch_size = batch_size
+        self.step_length_distribution = step_length_distribution
+        self._validate_step_length_distribution()
         self.gamma = gamma
         self.learning_rate = learning_rate
         self.max_gradient_norm = max_gradient_norm
@@ -229,13 +232,54 @@ class VanillaDQNTrainer(Trainer):
         assert self.target_update_every > 0
         assert self.batch_size <= self.min_buffer_to_train
 
+    def _validate_step_length_distribution(self):
+        total = sum(self.step_length_distribution.values())
+        if not np.isclose(total, 1.0):
+            raise ValueError("step_length_distribution values must sum to 1.0")
+        for k in self.step_length_distribution.keys():
+            if not isinstance(k, int) or k < 1:
+                raise ValueError("step_length_distribution keys must be integers >= 1")
+
     def start_game(self) -> None:
         pass
 
     def end_game(self) -> None:
         pass
 
-    def add_transition(self, tr: c4.Transition) -> None:
+    def add_episode(self, episode: List[c4.Transition]) -> None:
+        # Pick a step length according to the distribution
+        lengths, probs = zip(*self.step_length_distribution.items())
+        step_length = np.random.choice(lengths, p=probs)
+        for i in range(len(episode) - step_length + 1):
+            tr = episode[i]
+            if step_length == 1:
+                tr.info = {'step_length': 1}
+            else:
+                # Multi-step transition
+                # Reward = sum of discounted rewards
+                # s2, mask2, done come from last transition in the sequence
+                r = tr.r
+                g = 1.0
+                for j in range(1, step_length):
+                    g *= self.gamma
+                    r += g * episode[i + j].r
+                s2 = episode[i + step_length - 1].s2
+                mask2 = episode[i + step_length - 1].mask2
+                done = episode[i + step_length - 1].done
+
+                tr = c4.Transition(
+                    s=tr.s,
+                    a=tr.a,
+                    r=r,
+                    s2=s2,
+                    mask=tr.mask,
+                    mask2=mask2,
+                    done=done,
+                    info={'step_length': step_length}
+                )
+            self._add_transition(tr)
+
+    def _add_transition(self, tr: c4.Transition) -> None:
         self.replay_buffer.add(tr)
         self.step_count += 1
         if self.step_count > self.min_buffer_to_train and self.step_count % self.train_every == 0:

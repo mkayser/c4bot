@@ -21,6 +21,7 @@ class Transition(NamedTuple):
     mask: np.ndarray
     mask2: np.ndarray
     done: bool
+    info: Dict = {}  # metadata for logging/debugging
 
 
 class C4GameRoles():
