@@ -4,6 +4,7 @@ from dqn import ConvNetQFunction, QFunction, VanillaDQNTrainer
 from typing import Any, Dict, List, Tuple, Union
 import numpy as np
 import torch
+import utils
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -46,7 +47,13 @@ writer = SummaryWriter()  # TensorBoard writer
 qfunc = ConvNetQFunction(input_shape=env.observation_space(env.agents[0])['observation'].shape, 
                          num_actions=env.action_space(env.agents[0]).n,
                          device=device)
-action_picker = agents.make_epsilon_greedy(epsilon=0.15, rng=np.random.default_rng(42))
+
+action_picker_epsilon = utils.linear_sched(start=1.0, end=0.1, steps=100000)
+action_picker = agents.EpsilonGreedyPicker(epsilon=action_picker_epsilon, 
+                                           rng=np.random.default_rng(42), 
+                                           writer=writer, 
+                                           writer_tag_prefix="a2/epsilon")
+
 trainer = VanillaDQNTrainer(qfunction=qfunc, 
                             buffer_size=10000,
                             batch_size=128,

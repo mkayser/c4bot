@@ -14,3 +14,7 @@ def jprint(label, obj):
     print(f"\n{label} =")
     print(json.dumps(obj, indent=2, default=np_encoder, ensure_ascii=False))
 
+# Hyperparameter schedules
+def linear_sched(start, end, steps):
+    return lambda t: start + (end - start) * min(1.0, t / steps)
+
