@@ -253,7 +253,16 @@ class VanillaDQNTrainer(Trainer):
         for i in range(len(episode) - step_length + 1):
             tr = episode[i]
             if step_length == 1:
-                tr.info = {'step_length': 1}
+                tr = c4.Transition(
+                    s=tr.s,
+                    a=tr.a,
+                    r=tr.r,
+                    s2=tr.s2,
+                    mask=tr.mask,
+                    mask2=tr.mask2,
+                    done=tr.done,
+                    info={'step_length': 1}
+                )
             else:
                 # Multi-step transition
                 # Reward = sum of discounted rewards
