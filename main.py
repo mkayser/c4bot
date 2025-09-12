@@ -8,7 +8,7 @@ import utils
 from torch.utils.tensorboard import SummaryWriter
 
 
-class RecentScoreRingBuffer:
+class RecentValuesRingBuffer:
     def __init__(self, size: int = 100):
         self.size = size
         self.buffer: List[float] = []
@@ -18,6 +18,7 @@ class RecentScoreRingBuffer:
     def add(self, score: float) -> None:
         if len(self.buffer) < self.size:
             self.buffer.append(score)
+            self.sum += score
         else:
             self.sum -= self.buffer[self.index]
             self.sum += score
@@ -49,7 +50,7 @@ qfunc = ConvNetQFunction(input_shape=env.observation_space(env.agents[0])['obser
                          device=device)
 
 # Create action picker with epsilon schedule
-action_picker_epsilon = utils.linear_sched(start=1.0, end=0.1, steps=800000)
+action_picker_epsilon = utils.linear_sched(start=1.0, end=0.1, steps=100000)
 action_picker = agents.EpsilonGreedyPicker(epsilon=action_picker_epsilon, 
                                            rng=np.random.default_rng(42), 
                                            writer=writer, 
@@ -73,16 +74,16 @@ trainer = VanillaDQNTrainer(qfunction=qfunc,
                             writer=writer)
 
 
-with agents.HtmlQLLogger("game_log.html", append=False, max_games_to_write=100, game_write_interval=100) as logger:
+with agents.HtmlQLLogger("game_log_greedy.html", append=False, max_games_to_write=1000, game_write_interval=100) as logger:
     a1 = agents.RandomAgent()
-    a2 = agents.QAgent(qfunction=qfunc, action_picker=action_picker, logger=logger)
+    a2 = agents.QAgent(qfunction=qfunc, action_picker=action_picker, logger=None)
     a2_greedy = agents.QAgent(qfunction=qfunc, action_picker=greedy_action_picker, logger=None)
 
-
-    num_games = 300000
-    recent_scores = RecentScoreRingBuffer(size=500)
-    recent_scores_greedy = RecentScoreRingBuffer(size=100)
-    log_winrate_every = 100
+    num_games = 100000
+    recent_scores = RecentValuesRingBuffer(size=500)
+    recent_scores_greedy = RecentValuesRingBuffer(size=100)
+    recent_game_lengths = RecentValuesRingBuffer(size=100)
+    log_gamestats_every = 100
     play_greedy_every = 5
 
     for game_idx in range(num_games):
@@ -95,6 +96,7 @@ with agents.HtmlQLLogger("game_log.html", append=False, max_games_to_write=100, 
         # Track recent win rate for a1
         a2_score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
         recent_scores.add(a2_score)
+        recent_game_lengths.add(float(result.game_length()))
 
         # Play game with greedy a2 every log_winrate_every games
         if (game_idx % play_greedy_every) == 0 and game_idx > 0:
@@ -105,10 +107,12 @@ with agents.HtmlQLLogger("game_log.html", append=False, max_games_to_write=100, 
             writer.add_scalar("game/recent_avg_score_a2_greedy", avg_score_greedy, game_idx)
 
         # Print game result
-        if (game_idx % log_winrate_every) == 0 and game_idx > 0:
+        if (game_idx % log_gamestats_every) == 0 and game_idx > 0:
             avg_score = recent_scores.average_if_full()
+            avg_game_length = recent_game_lengths.average_if_full()
             writer.add_scalar("game/recent_avg_score_a1", avg_score, game_idx)
-            print(f"\rGame {game_idx}/{num_games}  recent avg score a1: {avg_score:.3f}           ", end="")
+            writer.add_scalar("game/recent_avg_game_length", avg_game_length, game_idx)
+            print(f"\rGame {game_idx}/{num_games}  recent avg score a1: {avg_score:.3f}      recent avg gamelen: {avg_game_length:.3f}        ", end="")
 
 
         # Feed transitions to trainer

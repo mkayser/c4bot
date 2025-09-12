@@ -1,4 +1,5 @@
-from pettingzoo.classic import connect_four_v3
+#from pettingzoo.classic import connect_four_v3
+import c4env
 from supersuit import dtype_v0, normalize_obs_v0, observation_lambda_v0
 from gymnasium import spaces
 import numpy as np
@@ -42,6 +43,9 @@ class C4GameRecord():
             self.winner = player_id
         else:
             self.winner = 'draw'
+
+    def game_length(self):
+        return len(self.moves)
         
 
 
@@ -64,7 +68,7 @@ def change_space(old_space, _param):
 
 
 def initialize_env():
-    env = connect_four_v3.env(render_mode="ansi")  # text render, no pygame window
+    env = c4env.env(render_mode="ansi")  # text render, no pygame window
     env = observation_lambda_v0(env, change_obs, change_space)
 
     print("render_mode seen by wrapper:", getattr(env, "render_mode", None))

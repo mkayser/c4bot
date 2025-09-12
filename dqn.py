@@ -180,6 +180,9 @@ def log_dqn_metrics(*, step: int,
         except TypeError:
             pass  # buffer doesn't support with_age
 
+# helper function to compute L2 norm of model parameters for debugging
+def l2_params(m): 
+    return torch.sqrt(sum((p.detach()**2).sum() for p in m.parameters()))
 
 class VanillaDQNTrainer(Trainer):
     def __init__(self, 
@@ -344,6 +347,23 @@ class VanillaDQNTrainer(Trainer):
         # Update target network
         if self.train_step_count % self.target_update_every == 0:
             self.target_qfunction.load_state_dict(self.qfunction.state_dict())  
+
+        # Debug logging: currently every step
+        if self.writer is not None:
+            # Debug metrics: online and target L2 norm, norm of diff
+            with torch.no_grad():
+                diff = torch.sqrt(sum(((p1.detach()-p2.detach())**2).sum()
+                                    for p1,p2 in zip(self.qfunction.parameters(), self.target_qfunction.parameters())))
+                self.writer.add_scalar("debug/param_norm_online", l2_params(self.qfunction).item(), self.train_step_count)
+                self.writer.add_scalar("debug/param_norm_target", l2_params(self.target_qfunction).item(), self.train_step_count)
+                self.writer.add_scalar("debug/param_l2_diff",     diff.item(), self.train_step_count)
+
+            # Debug metrics: done and reward mean in batch, tick for target hard update
+            self.writer.add_scalar("debug/done_mean",  done_batch.float().mean().item(), self.train_step_count)
+            self.writer.add_scalar("debug/r_mean",     r_batch.mean().item(), self.train_step_count)
+            self.writer.add_scalar("debug/target_hard_update", int(self.train_step_count % self.target_update_every == 0), self.train_step_count)
+
+
 
         # Logging
         if self.writer is not None and self.train_step_count % self.log_every == 0:
