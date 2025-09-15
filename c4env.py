@@ -313,7 +313,7 @@ class raw_env(AECEnv, EzPickle):
                 if (
                     board[r][c] == piece
                     and board[r][c + 1] == piece
-                    #and board[r][c + 2] == piece
+                    and board[r][c + 2] == piece
                     #and board[r][c + 3] == piece
                 ):
                     return True
@@ -324,7 +324,7 @@ class raw_env(AECEnv, EzPickle):
                 if (
                     board[r][c] == piece
                     and board[r + 1][c] == piece
-                    #and board[r + 2][c] == piece
+                    and board[r + 2][c] == piece
                     #and board[r + 3][c] == piece
                 ):
                     return True
@@ -335,7 +335,7 @@ class raw_env(AECEnv, EzPickle):
                 if (
                     board[r][c] == piece
                     and board[r + 1][c + 1] == piece
-                    #and board[r + 2][c + 2] == piece
+                    and board[r + 2][c + 2] == piece
                     #and board[r + 3][c + 3] == piece
                 ):
                     return True
@@ -346,7 +346,7 @@ class raw_env(AECEnv, EzPickle):
                 if (
                     board[r][c] == piece
                     and board[r - 1][c + 1] == piece
-                    #and board[r - 2][c + 2] == piece
+                    and board[r - 2][c + 2] == piece
                     #and board[r - 3][c + 3] == piece
                 ):
                     return True

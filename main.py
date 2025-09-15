@@ -50,7 +50,7 @@ qfunc = ConvNetQFunction(input_shape=env.observation_space(env.agents[0])['obser
                          device=device)
 
 # Create action picker with epsilon schedule
-action_picker_epsilon = utils.linear_sched(start=1.0, end=0.1, steps=100000)
+action_picker_epsilon = utils.linear_sched(start=1.0, end=0.1, steps=60000)
 action_picker = agents.EpsilonGreedyPicker(epsilon=action_picker_epsilon, 
                                            rng=np.random.default_rng(42), 
                                            writer=writer, 

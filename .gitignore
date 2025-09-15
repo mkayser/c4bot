@@ -1,3 +1,5 @@
 *~
 __pycache__
 game_log.html
+*.html
+runs/

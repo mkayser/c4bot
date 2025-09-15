@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 import c4
-from typing import Protocol, Optional, NamedTuple, Dict, List, Any, Tuple
+from typing import Protocol, Optional, NamedTuple, Dict, List, Any, Tuple, Callable
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -44,6 +44,112 @@ class ConvNetQFunction(nn.Module):
         self.input_shape = input_shape
         self.num_actions = num_actions
         self.device_ = torch.device(device)
+
+        self.net = nn.Sequential(
+            nn.Conv2d(c, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64 * h * w, 512),
+            nn.ReLU(),
+            nn.Linear(512, num_actions),
+        )
+        self.to(self.device_)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, C, H, W), float32
+        return self.net(x)
+
+    @torch.no_grad()
+    def scores(self, s: np.ndarray) -> np.ndarray:
+        # Convenience inference helper
+        self.eval()
+        x = torch.from_numpy(s).float().unsqueeze(0).to(self.device_)  # (1,C,H,W)
+        q = self(x).squeeze(0).cpu().numpy()
+        return q
+
+    def clone(self) -> ConvNetQFunction:
+        # Proper clone: same class and constructor, then copy weights
+        m = type(self)(self.input_shape, self.num_actions, device=self.device_)
+        m.load_state_dict(self.state_dict())
+        return m
+    
+
+class FeatureExtractor(Protocol):
+    def extract(self, s: np.ndarray) -> np.ndarray: ...
+
+class ColumnAccumulatedLocalizedFeatureExtractor:
+    def __init__(self, 
+                 predicate: Callable[[np.ndarray, int, int], bool]):
+        self.predicate = predicate
+
+    def extract(self, s: np.ndarray) -> np.ndarray:
+        # s: (C,H,W)
+        c, h, w = s.shape
+        counts = np.zeros((w,), dtype=np.float32)
+        for row in range(h):
+            for col in range(w):    
+                if self.predicate(s, row, col):
+                    counts[col] += 1
+        return counts
+
+class LocalizedFeaturePredicates:
+    @staticmethod
+    def is_my_piece(s: np.ndarray, row: int, col: int) -> bool:
+        return s[0, row, col] > 0.5
+
+    @staticmethod
+    def is_opp_piece(s: np.ndarray, row: int, col: int) -> bool:
+        return s[1, row, col] > 0.5
+
+    @staticmethod
+    def is_empty(s: np.ndarray, row: int, col: int) -> bool:
+        return s[0, row, col] < 0.5 and s[1, row, col] < 0.5
+
+    @staticmethod
+    def belongs_to_my_2inarow(s: np.ndarray, row: int, col: int) -> bool:
+        curr_loc = LocalizedFeaturePredicates.is_my_piece(s, row, col)
+        if not curr_loc:
+            return False
+        else:
+            # Check right
+            if col + 1 < s.shape[2] and LocalizedFeaturePredicates.is_my_piece(s, row, col + 1):
+                return True
+            # Check left
+            if col - 1 >= 0 and LocalizedFeaturePredicates.is_my_piece(s, row, col - 1):
+                return True
+            # Check up
+            if row - 1 >= 0 and LocalizedFeaturePredicates.is_my_piece(s, row - 1, col):
+                return True
+            # Check down
+            if row + 1 < s.shape[1] and LocalizedFeaturePredicates.is_my_piece(s, row + 1, col):
+                return True
+            return False
+    
+    @staticmethod
+    def belongs_to_opp_2inarow(s: np.ndarray, row: int, col: int) -> bool:
+        return LocalizedFeaturePredicates.belongs_to_my_2inarow(s[::-1,:,:], row, col)
+    
+
+        
+
+
+class FeaturizedLinearQFunction(nn.Module):
+    def __init__(self, 
+                 input_shape: Tuple[int, ...], 
+                 num_actions: int,
+                 feature_extractors: List[FeatureExtractor], 
+                 device: torch.device | str = "cpu"
+                 ):
+        super().__init__()
+        c, h, w = input_shape
+        # Track init params so we can clone later
+        self.input_shape = input_shape
+        self.num_actions = num_actions
+        self.device_ = torch.device(device)
+
+        self.featurized_size = sum(fe.extract(np.zeros(input_shape)).size for fe in feature_extractors)
 
         self.net = nn.Sequential(
             nn.Conv2d(c, 32, kernel_size=3, stride=1, padding=1),
