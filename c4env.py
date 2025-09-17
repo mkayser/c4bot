@@ -122,7 +122,7 @@ class raw_env(AECEnv, EzPickle):
             i: spaces.Dict(
                 {
                     "observation": spaces.Box(
-                        low=0, high=1, shape=(6, 7, 2), dtype=np.int8
+                        low=0, high=1, shape=(2, 6, 7), dtype=np.int8
                     ),
                     "action_mask": spaces.Box(low=0, high=1, shape=(7,), dtype=np.int8),
                 }
@@ -132,6 +132,9 @@ class raw_env(AECEnv, EzPickle):
 
         if self.render_mode == "human":
             self.clock = pygame.time.Clock()
+
+    def get_raw_board(self):
+        return np.array(self.board).reshape(6, 7)
 
     # Key
     # ----
@@ -154,7 +157,7 @@ class raw_env(AECEnv, EzPickle):
         cur_p_board = np.equal(board_vals, cur_player + 1)
         opp_p_board = np.equal(board_vals, opp_player + 1)
 
-        observation = np.stack([cur_p_board, opp_p_board], axis=2).astype(np.int8)
+        observation = np.stack([cur_p_board, opp_p_board], axis=0).astype(np.int8)
         legal_moves = self._legal_moves() if agent == self.agent_selection else []
 
         action_mask = np.zeros(7, "int8")
@@ -308,46 +311,48 @@ class raw_env(AECEnv, EzPickle):
         column_count = 7
         row_count = 6
 
-        for c in range(column_count - 3):
+        CONNECT_LENGTH_MINUS_ONE = 3
+
+        for c in range(column_count - CONNECT_LENGTH_MINUS_ONE):
             for r in range(row_count):
                 if (
                     board[r][c] == piece
                     and board[r][c + 1] == piece
                     and board[r][c + 2] == piece
-                    #and board[r][c + 3] == piece
+                    and board[r][c + 3] == piece
                 ):
                     return True
 
         # Check vertical locations for win
         for c in range(column_count):
-            for r in range(row_count - 3):
+            for r in range(row_count - CONNECT_LENGTH_MINUS_ONE):
                 if (
                     board[r][c] == piece
                     and board[r + 1][c] == piece
                     and board[r + 2][c] == piece
-                    #and board[r + 3][c] == piece
+                    and board[r + 3][c] == piece
                 ):
                     return True
 
         # Check positively sloped diagonals
-        for c in range(column_count - 3):
-            for r in range(row_count - 3):
+        for c in range(column_count - CONNECT_LENGTH_MINUS_ONE):
+            for r in range(row_count - CONNECT_LENGTH_MINUS_ONE):
                 if (
                     board[r][c] == piece
                     and board[r + 1][c + 1] == piece
                     and board[r + 2][c + 2] == piece
-                    #and board[r + 3][c + 3] == piece
+                    and board[r + 3][c + 3] == piece
                 ):
                     return True
 
         # Check negatively sloped diagonals
-        for c in range(column_count - 3):
+        for c in range(column_count - CONNECT_LENGTH_MINUS_ONE):
             for r in range(3, row_count):
                 if (
                     board[r][c] == piece
                     and board[r - 1][c + 1] == piece
                     and board[r - 2][c + 2] == piece
-                    #and board[r - 3][c + 3] == piece
+                    and board[r - 3][c + 3] == piece
                 ):
                     return True
 

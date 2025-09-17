@@ -2,6 +2,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import Optional, Any, List, Dict, Protocol, Callable
 from logger import HtmlQLLogger
+import minimax
 
 
 class Agent(Protocol):
@@ -22,6 +23,51 @@ class RandomAgent(Agent):
         pass
           
     def act(self, obs: np.ndarray, action_mask: np.ndarray):
+        # choose uniformly among mask-positive moves
+        legal_moves = np.flatnonzero(action_mask)
+        chosen_move = self.rng.choice(legal_moves)
+        return int(chosen_move)
+    
+    def end_game(self) -> None:
+        pass
+
+
+# --- Mostly random but plays forced wins -----
+class RandomC3AgentWithForcedWins(Agent):
+    def __init__(self, seed: Optional[int] = None):
+        self.rng = np.random.default_rng(seed)
+
+    def start_game(self, player_id: str) -> None:
+        pass
+
+    def _is_winning_board(self, board: np.ndarray) -> bool:
+        # Check horizontal, vertical, and diagonal for a win
+        for r in range(6):
+            for c in range(5):
+                if np.all(board[0, r, c:c+3] == 1.0):
+                    return True
+        for c in range(7):
+            for r in range(4):
+                if np.all(board[0, r:r+3, c] == 1.0):
+                    return True
+        for r in range(4):
+            for c in range(5):
+                if np.all([board[0, r+i, c+i] == 1.0 for i in range(3)]):
+                    return True
+                if np.all([board[0, r+2-i, c+i] == 1.0 for i in range(3)]):
+                    return True
+        return False
+          
+    def act(self, obs: np.ndarray, action_mask: np.ndarray):
+        # Check for immediate winning moves
+        for move in np.flatnonzero(action_mask):
+            temp_board = obs.copy()
+            for r in range(5, -1, -1):
+                if temp_board[0, r, move] == 0 and temp_board[1, r, move] == 0:
+                    temp_board[0, r, move] = 1.0 
+                    break
+            if self._is_winning_board(temp_board):
+                return int(move)
         # choose uniformly among mask-positive moves
         legal_moves = np.flatnonzero(action_mask)
         chosen_move = self.rng.choice(legal_moves)
@@ -65,12 +111,68 @@ class EpsilonGreedyPicker:
         return int(legal_idx[self.rng.choice(best)])
 
 
+class NegamaxAgent(Agent):
+    def __init__(self, h:int, w:int, search_depth = 4, connect_goal:int = 4):
+        self.h = h
+        self.w = w
+        self.search_depth = search_depth
+        self.connect_goal = connect_goal
+
+    def start_game(self, player_id):
+        pass
+
+    def end_game(self):
+        pass
+
+    def act(self, obs: np.ndarray, action_mask: np.ndarray):
+        assert obs.shape == (2, self.h, self.w)
+        board_state = (obs[0] - obs[1]).astype(np.int8)
+        board_evaluator = minimax.SimpleEvaluator()
+        c4env = minimax.C4Env(self.h, self.w, self.connect_goal, board_state)
+        return minimax.negamax_best_action(c4env, self.search_depth, board_evaluator)
+    
+class HumanAgent(Agent):
+    def __init__(self):
+        pass
+
+    def start_game(self, player_id):
+        pass
+
+    def end_game(self):
+        pass
+
+    def _display_board_ansi(self, obs: np.ndarray):
+        ch,h,w = obs.shape
+        print("\n")
+        for r in range(h):
+            row_chars = []
+            for c in range(w):
+                if obs[0,r,c] == 1:
+                    row_chars.append("o")
+                elif obs[1,r,c] == 1:
+                    row_chars.append("x")
+                else:
+                    row_chars.append(".")
+            print("".join(row_chars))
+        print("\n")
+
+    def _prompt_action(self, width):
+        action_str = input(f"Enter an action [0 - {width-1}]: ")
+        return int(action_str)
+
+    def act(self, obs:np.ndarray, action_mask: np.ndarray):
+        c,h,w = obs.shape
+        self._display_board_ansi(obs)
+        action = self._prompt_action(w)
+        assert(action_mask[action])
+        return action
+        
 
 
 class QAgent(Agent):
     def __init__(self, 
                  qfunction: Any, 
-                 action_picker: Any,
+                 action_picker: ActionPicker,
                  logger: Optional[HtmlQLLogger] = None
                  ):
         self.qfunction = qfunction

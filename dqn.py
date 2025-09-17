@@ -40,6 +40,7 @@ class ConvNetQFunction(nn.Module):
     def __init__(self, input_shape: Tuple[int, ...], num_actions: int, device: torch.device | str = "cpu"):
         super().__init__()
         c, h, w = input_shape
+        assert c == 2 and h == 6 and w == 7, f"Unexpected input shape {input_shape}"
         # Track init params so we can clone later
         self.input_shape = input_shape
         self.num_actions = num_actions
@@ -220,6 +221,9 @@ class TransitionReplayBuffer:
         self.next = (i + 1) % self.capacity
         if self.size < self.capacity:
             self.size += 1
+
+    def num_entries(self) -> int:
+        return self.size
 
     def sample(self, batch_size):
         idx = np.random.randint(0, self.size, size=batch_size)
@@ -402,9 +406,6 @@ class VanillaDQNTrainer(Trainer):
         self.step_count += 1
         if self.step_count > self.min_buffer_to_train and self.step_count % self.train_every == 0:
             self.train()
-        if self.step_count % self.target_update_every == 0:
-            # Update target network
-            pass
 
     def train(self) -> None:
         # Only train if we have enough samples
