@@ -1,6 +1,7 @@
 import numpy as np
-from typing import Callable, Optional, Tuple, Iterable
+from typing import Callable, Optional, Tuple, Iterable, List
 from typing import Protocol
+import scipy.signal
 
 
 
@@ -128,8 +129,10 @@ class SimpleEvaluator:
         EMPTY = 0
         OPPONENT = -1
 
-    def __init__(self):
+    def __init__(self, h, w):
         SAME, EMPTY, OPPONENT = self.SequenceElement.SAME, self.SequenceElement.EMPTY, self.SequenceElement.OPPONENT
+        self.h = h
+        self.w = w
         self.sequences = [
             [EMPTY, SAME, SAME, SAME],  # open 3
             [SAME, SAME, SAME, EMPTY],  # open 3
@@ -140,12 +143,54 @@ class SimpleEvaluator:
             [SAME, SAME, EMPTY],         # 2 with gap
         ]
 
+        # We're not currently using OPPONENT so need to expand _generate_filter() to make use of it
+        assert all(OPPONENT not in l for l in self.sequences), "OPPONENT filter element is not functional"
+
         self.directions = [
             (1, 0),  # vertical
             (0, 1),  # horizontal
             (1, 1),  # diagonal /
             (1, -1), # diagonal \
         ]
+
+        self.filters_and_target_values = self._generate_filters(self.sequences, self.directions)
+
+    def _generate_filter(self,
+                         s: List[SequenceElement],
+                         d: Tuple[int]):
+        f_size = len(s)
+        d = np.array(d)
+        pairs = np.outer(np.arange(f_size), d)
+        # Fix 'p' to be the 2d array of relative positions we need to query, with no negatives 
+        m = pairs.min(axis=0)
+        pairs -= m
+        # Dimensions needed for this filter = max position queried + 1
+        dims = pairs.max(axis=0) + 1
+        filter = np.zeros(shape=dims)
+        # Place values in the query positions: 
+        #  1 if SAME/OPPONENT, 
+        #  1000 (arbitrary large value) if EMPTY
+        # Reason: 1000 x 1 or 1000 x -1 are both guaranteed outside the target value
+        # Note: this does not work for multiple EMPTY's (they could cancel) so just assert only one EMPTY
+        assert(s.count(self.SequenceElement.EMPTY) <= 1)
+        LARGE_VAL = 1000
+        target_value = 0
+        for pair,seqel in zip(pairs, s):
+            if seqel == self.SequenceElement.EMPTY:
+                filter[tuple(pair)] = LARGE_VAL
+            else:
+                filter[tuple(pair)] = 1
+                target_value += 1
+        return (filter, [(target_value, 1) , (-1 * target_value, -1)])
+        
+    def _generate_filters(self, 
+                          sequences: List[List[SequenceElement]],
+                          directions: List[Tuple[int]]):
+        filters_and_target_values = []
+        for s in sequences:
+            for d in directions:
+                filters_and_target_values.append(self._generate_filter(s,d))
+        return filters_and_target_values
 
     def _count_sequences(self, board: np.ndarray, player: int) -> int:
         count = 0
@@ -179,11 +224,27 @@ class SimpleEvaluator:
         p1_count = self._count_sequences(board, player=-1)
         return float(p0_count - p1_count)
     
+    def _raw_score_v2(self, board: np.ndarray) -> float:
+        total = 0.0
+        for f, targetval_score_pairs in self.filters_and_target_values:
+            conv = scipy.signal.convolve2d(board, f, mode='valid')
+            for target,score in targetval_score_pairs:
+                total += score * np.count_nonzero(conv == target)
+        return total
+
+
+
     def _clamped_scaled_score(self, board: np.ndarray) -> float:
         # Scale raw score to [-.9, +.9] range with clamping
         # Note that scale is arbitrary
         # We just want something monotonic and bounded away from -1/+1
-        raw_score = self._raw_score(board)
+        #raw_score = self._raw_score(board)
+        raw_score = self._raw_score_v2(board)
+
+        #if raw_score != raw_score_v2:
+        #    print(f"Mismatching raw score: {raw_score} (old method) versus {raw_score_v2} (conv method)")
+        #    print(board)
+        #    exit(1)
         max_abs = 20.0
         clamped = max(-max_abs, min(max_abs, raw_score))
         return 0.9 * (clamped / max_abs)

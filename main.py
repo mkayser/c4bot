@@ -34,7 +34,7 @@ def print_transition(tr: c4.Transition) -> None:
     print(f"STATE {tr.a} {tr.r} STATE2 {tr.mask} {tr.mask2}")
 
 
-def main()
+def main():
     # Determine if we have a GPU available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -83,7 +83,7 @@ def main()
     #record, trans1, trans2 = c4.play_game(env, a1, a2, render=False, verbose=False)
     #print(f"Winner: {record.winner}")
     #print(f"Last move: {record.moves[-1]}")
-    #exit(0)
+    #return
 
     with agents.HtmlQLLogger("game_log_greedy.html", append=False, max_games_to_write=1000, game_write_interval=100) as logger:
         #a1 = agents.RandomAgent()

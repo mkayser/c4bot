@@ -117,6 +117,7 @@ class NegamaxAgent(Agent):
         self.w = w
         self.search_depth = search_depth
         self.connect_goal = connect_goal
+        self.board_evaluator = minimax.SimpleEvaluator(h, w)
 
     def start_game(self, player_id):
         pass
@@ -127,9 +128,8 @@ class NegamaxAgent(Agent):
     def act(self, obs: np.ndarray, action_mask: np.ndarray):
         assert obs.shape == (2, self.h, self.w)
         board_state = (obs[0] - obs[1]).astype(np.int8)
-        board_evaluator = minimax.SimpleEvaluator()
         c4env = minimax.C4Env(self.h, self.w, self.connect_goal, board_state)
-        return minimax.negamax_best_action(c4env, self.search_depth, board_evaluator)
+        return minimax.negamax_best_action(c4env, self.search_depth, self.board_evaluator)
     
 class HumanAgent(Agent):
     def __init__(self):
