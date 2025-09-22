@@ -4,3 +4,6 @@ game_log.html
 *.html
 runs/
 profile.out
+.venv
+.vscode
+
