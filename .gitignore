@@ -6,4 +6,4 @@ runs/
 profile.out
 .venv
 .vscode
-
+outputs/
