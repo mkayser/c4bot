@@ -152,7 +152,11 @@ def load_player(c: PlayerCfg, writer: utils.SummaryWriterLike):
     if isinstance(c, RandomAgentCfg): return agents.RandomAgent(c.rng_seed)
     if isinstance(c, NegamaxAgentCfg): return agents.NegamaxAgent(c.h, c.w, c.search_depth)
     if isinstance(c, QAgentCfg): 
-        html_logger = agents.HtmlQLLogger(c.html_log_file) if c.html_log_file else None
+        if c.html_log_file:
+            html_logger = agents.HtmlQLLogger(c.html_log_file)
+            html_logger.__enter__()
+        else:
+            html_logger = None
         return agents.QAgent(load_qfunction(c.qfunction), load_action_picker(c.action_picker, writer), html_logger)
     raise NotImplementedError(f"{c} configures an agent that is not implemented")
     
@@ -412,6 +416,9 @@ def main(cfg: DictConfig):
                 break
             time.sleep(0.1)
     except KeyboardInterrupt:
+        stop.set()
+        for p in procs: p.join()
+    finally:
         stop.set()
         for p in procs: p.join()
 
