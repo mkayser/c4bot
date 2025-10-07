@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Any, List, Dict, Protocol, Callable
 from logger import HtmlQLLogger
 import minimax
+import utils
 
 
 class Agent(Protocol):
@@ -85,12 +86,10 @@ class EpsilonGreedyPicker:
     def __init__(self, 
                  epsilon: float | Callable[[int], float], 
                  rng: np.random.Generator,
-                 writer: Optional[Any] = None,
-                 writer_tag_prefix: str = "epsilon_greedy"):
+                 writer: Optional[utils.SummaryWriterLike]]) = None:
         self.epsilon = epsilon
         self.rng = rng
         self.writer = writer
-        self.writer_tag_prefix = writer_tag_prefix
 
     def _eps(self, step :int) -> float:
         e = self.epsilon(step) if callable(self.epsilon) else self.epsilon
@@ -101,7 +100,7 @@ class EpsilonGreedyPicker:
         legal_idx = np.flatnonzero(mask)
         eps = self._eps(step)
         if self.writer:
-            self.writer.add_scalar(self.writer_tag_prefix + "/epsilon", eps, step)
+            self.writer.add_scalar("epsilon", eps, step)
         if not legal_idx.size:
             raise ValueError("No legal actions available.")
         if self.rng.random() < eps:

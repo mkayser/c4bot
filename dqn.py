@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
+import utils
 import copy
 
 
@@ -240,7 +241,7 @@ def log_dqn_metrics(*, step: int,
                 q_values: torch.Tensor,    # [B, A] from online net
                 mask: torch.Tensor | None, # [B, A] bool (True = legal) or None
                 q_net: torch.nn.Module,
-                writer: SummaryWriter,
+                writer: utils.SummaryWriterLike,
                 grad_clip_max: float | None = None,
                 replay=None,               # optional: must expose sample(..., with_age=True)
                 tag_prefix: str = "train"):
@@ -308,7 +309,8 @@ class VanillaDQNTrainer(Trainer):
                  optimizer: Optional[torch.optim.Optimizer] = None,
                  learning_rate: float = 1e-3,
                  max_gradient_norm: float = 10.0,
-                 writer: Optional[SummaryWriter] = None,
+                 writer: Optional[utils.SummaryWriterLike] = None,
+                 start_tick = 0,
                  log_every: int = 100
                  ):  
         self.qfunction = qfunction
@@ -329,7 +331,7 @@ class VanillaDQNTrainer(Trainer):
         self.learning_rate = learning_rate
         self.max_gradient_norm = max_gradient_norm
         self.target_update_every = target_update_every
-        self.step_count = 0
+        self.step_count = start_tick
         self.train_step_count = 0
         self.replay_buffer = TransitionReplayBuffer(buffer_size, qfunction.input_shape, qfunction.num_actions)
         self.optimizer = optimizer if optimizer is not None else optim.Adam(self.qfunction.parameters(), lr=learning_rate)

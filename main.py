@@ -1,142 +1,411 @@
 import c4
 import agents
 from dqn import ConvNetQFunction, QFunction, VanillaDQNTrainer
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union, Callable, Literal
 import numpy as np
 import torch
 import utils
 from torch.utils.tensorboard import SummaryWriter
+from dataclasses import dataclass, field
+import hydra
+from hydra.utils import instantiate
+from hydra.core.config_store import ConfigStore
+from omegaconf import DictConfig, OmegaConf
+from multiprocessing import Process, Queue, Event
+from multiprocessing.synchronize import Event as EventType
+import queue
+import time
 
 
-class RecentValuesRingBuffer:
-    def __init__(self, size: int = 100):
-        self.size = size
-        self.buffer: List[float] = []
-        self.index = 0
-        self.sum = 0.0
 
-    def add(self, score: float) -> None:
-        if len(self.buffer) < self.size:
-            self.buffer.append(score)
-            self.sum += score
+# Hydra config classes
+
+@dataclass
+class GameRunnerCfg:
+    play_every: int = 1
+    pinned_player: str
+    opponent_pool: List[str]
+    log_every: int = 100
+    writer_prefix: str
+    export_episodes: bool = True
+
+@dataclass 
+class RandomAgentCfg:
+    type: Literal["RandomAgent"] = "RandomAgent"
+    rng_seed: int
+
+@dataclass 
+class NegamaxAgentCfg:
+    type: Literal["NegamaxAgent"] = "NegamaxAgent"
+    h: int
+    w: int
+    search_depth: int
+
+@dataclass
+class ConvNetQFunctionCfg:
+    type: Literal["ConvNetQFunction"] = "ConvNetQFunction"
+    input_shape: List[int]
+    num_actions: int
+    device: str
+
+# Later can make this a union when there are other QFunctionCfg types
+QFunctionCfg = ConvNetQFunctionCfg
+
+@dataclass 
+class EpsilonGreedyPickerCfg:
+    type: Literal["EpsilonGreedyPicker"] = "EpsilonGreedyPicker"
+    epsilon: Dict[int, Any]
+    rng_seed: int
+    writer_prefix: str
+
+# Later can make this a union 
+ActionPickerCfg = EpsilonGreedyPickerCfg
+
+@dataclass
+class QAgentCfg:
+    type: Literal["QAgent"] = "QAgent"
+    update_from_queue: bool
+    html_log_file: str
+    qfunction: QFunctionCfg
+    action_picker: ActionPickerCfg
+
+PlayerCfg = Union[RandomAgentCfg, NegamaxAgentCfg, QAgentCfg]
+
+@dataclass
+class GamePlayLoopCfg:
+    start_tick: int = 0  # Starting tick for the game loop
+    max_ticks: int = 10000  # Maximum ticks to run the game loop
+    rng_seed: int
+    game_runners: List[GameRunnerCfg]
+    players: Dict[str, PlayerCfg]  # List of player configurations
+
+@dataclass
+class LearnerCfg:
+    start_tick: int = 0
+    max_ticks: int = 100000
+    qfunction: QFunctionCfg
+    step_lengths: Dict[int,float]
+    replay_buffer_size: int
+    replay_buffer_min_to_train: int
+    batch_size: int
+    learning_rate: float
+    train_every: int
+    target_update_every: int
+    update_player_every: int
+    max_gradient_norm: float
+    gamma: float
+
+
+
+@dataclass
+class LoggerCfg:
+    writer_prefix: str
+
+@dataclass
+class AppCfg:
+    game_play_loop: GamePlayLoopCfg
+    learner: LearnerCfg
+    logger: LoggerCfg
+
+####
+# Loader functions
+
+def load_qfunction(c: QFunctionCfg):
+    if isinstance(c, ConvNetQFunctionCfg): return ConvNetQFunction(c.input_shape, c.num_actions, c.device)
+    raise TypeError(f"Unsupported QFunctionCfg: {type(c).__name__}")
+
+def load_epsilon_schedule(d: Dict[str, Any]):
+    if d["type"] == "linear_schedule":
+        return utils.linear_sched(float(d["start"]), float(d["end"]), int(d["steps"]))
+    elif d["type"] == "fixed":
+        return float(d["value"])
+    raise TypeError(f"Unsupported epsilon schedule type: {d["type"]}")
+
+def load_action_picker(c: ActionPickerCfg, writer: utils.SummaryWriterLike):
+    if isinstance(c, EpsilonGreedyPickerCfg):
+        prefixed_writer = writer.with_tag_prefix("action_picker")
+        return agents.EpsilonGreedyPicker(load_epsilon_schedule(c.epsilon), np.random.default_rng(c.rng_seed), writer=prefixed_writer)
+    raise NotImplementedError(f"{c} configures an action picker that is not implemented")
+
+def load_player(c: PlayerCfg, writer: utils.SummaryWriterLike):
+    if isinstance(c, RandomAgentCfg): return agents.RandomAgent(c.rng_seed)
+    if isinstance(c, NegamaxAgentCfg): return agents.NegamaxAgent(c.h, c.w, c.search_depth)
+    if isinstance(c, QAgentCfg): 
+        html_logger = agents.HtmlQLLogger(c.html_log_file) if c.html_log_file else None
+        return agents.QAgent(load_qfunction(c.qfunction), load_action_picker(c.action_picker, writer), html_logger)
+    raise NotImplementedError(f"{c} configures an agent that is not implemented")
+    
+def load_game_runner(c: GameRunnerCfg):
+    return GameRunnerState(c, 0, utils.RecentValuesRingBuffer(), utils.RecentValuesRingBuffer())
+
+####
+
+@dataclass 
+class GameRunnerState:
+    cfg: GameRunnerCfg
+    num_games_played: int
+    recent_scores: utils.RecentValuesRingBuffer
+    recent_game_lengths: utils.RecentValuesRingBuffer
+
+def game_play_loop(cfg: GamePlayLoopCfg, 
+                   params_q: Queue, 
+                   episodes_q: Queue, 
+                   logs_q: Queue, 
+                   stop_event: EventType):
+    # instantiate env
+    # create players
+    # create game runners
+    # initialize game tick, set max ticks
+    # enter loop (while not stop event): 
+    #   * Update weights from queue if present
+    #   * tick game counter
+    #   * iterate through game runners:
+    #     * if time to run a game:
+    #       * run a game
+    #       * update stats and html log if necessary
+    #       * export episodes to outqueue if necessary
+    
+    def play_one_game(gr: GameRunnerState, 
+                      players: Dict[str, agents.Agent], 
+                      episodes_q: Queue, 
+                      rng: np.random.Generator,
+                      writer: utils.SummaryWriterLike):
+        
+        # Pick players
+        assert gr.cfg.pinned_player in players
+        main_player = players[gr.cfg.pinned_player]
+        opponent = players[gr.cfg.opponent_pool]
+        pinned_is_first = rng.integers(0,2)
+
+        # Play game
+        result: c4.C4GameRecord
+        episode: List[c4.Transition]
+        score: float
+        game_length: int
+
+        if pinned_is_first:
+            result, episode, _ = c4.play_game(env, main_player, opponent)
+            score = 1.0 if result.winner == c4.C4GameRoles.P0 else 0.0
+            game_length = float(result.game_length())
         else:
-            self.sum -= self.buffer[self.index]
-            self.sum += score
-            self.buffer[self.index] = score
-            self.index = (self.index + 1) % self.size
+            result, _, episode = c4.play_game(env, opponent, main_player)
+            score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
+            game_length = float(result.game_length())
+        
+        # Export episode
+        if gr.cfg.export_episodes:
+            try:
+                episodes_q.put_nowait(episode)
+            except queue.Full:
+                print("Episodes queue full")
 
-    def average_if_full(self) -> float:
-        if len(self.buffer) < self.size:
-            return 0.0
-        return self.sum / self.size
+        # Update stats
+        gr.recent_scores.add(score)
+        gr.recent_game_lengths.add(game_length)
+        gr.num_games_played += 1
 
-def print_transition(tr: c4.Transition) -> None:
-    print(f"STATE {tr.a} {tr.r} STATE2 {tr.mask} {tr.mask2}")
-
-
-def main():
-    # Determine if we have a GPU available
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
+        # Log result
+        if (gr.num_games_played % gr.cfg.log_every) == 0:
+            avg_score = gr.recent_scores.average_if_full()
+            avg_game_length = gr.recent_game_lengths.average_if_full()
+            writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_score", avg_score, gr.num_games_played)
+            writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_game_length", avg_game_length, gr.num_games_played)
 
     # Initialize environment
     env = c4.initialize_env()
     env.reset()  # Need to reset before querying spaces
 
-    # Initialize Q-function
-    writer = SummaryWriter()  # TensorBoard writer
-    qfunc = ConvNetQFunction(input_shape=env.observation_space(env.agents[0])['observation'].shape, 
-                            num_actions=env.action_space(env.agents[0]).n,
-                            device=device)
+    # Create SummaryWriterProxy
+    writer: utils.SummaryWriterLike = utils.SummaryWriterProxy(logs_q)
 
-    # Create action picker with epsilon schedule
-    action_picker_epsilon = utils.linear_sched(start=1.0, end=0.1, steps=70000)
-    action_picker = agents.EpsilonGreedyPicker(epsilon=action_picker_epsilon, 
-                                            rng=np.random.default_rng(42), 
-                                            writer=writer, 
-                                            writer_tag_prefix="a2/epsilon")
+    # Create players
+    players: Dict[str, agents.Agent] = {}
+    player_modules_to_update_from_queue: List[torch.nn.Module] = []
+    for player_name, player_cfg in cfg.players.items():
+        writer_prefix = f"players/{player_name}"
+        players[player_name] = load_player(player_cfg, writer.with_tag_prefix(writer_prefix))
+        if player_cfg.update_from_queue:
+            assert isinstance(players[player_name], agents.QAgent)
+            assert isinstance(players[player_name].qfunction, torch.nn.Module)
+            player_modules_to_update_from_queue.append(players[player_name].qfunction)
 
-    # Create purely greedy action picker for evaluation
-    greedy_action_picker = agents.EpsilonGreedyPicker(epsilon=0.0, 
-                                                    rng=np.random.default_rng(43))
+    # Create game runners
+    game_runners: List[GameRunnerState] = []
+    for game_runner_cfg in cfg.game_runners:
+        game_runners.append(load_game_runner(game_runner_cfg))
+
+    # Initialize state
+    max_ticks = cfg.max_ticks
+    rng = np.random.default_rng(cfg.rng_seed)
+
+    # Main loop
+    game_tick = 0
+    while not stop_event.is_set() and game_tick < max_ticks:
+        
+        # Drain param updates (keep only last)
+        last_params = None
+        try:
+            while True:
+                last_params = params_q.get_nowait()
+        except queue.Empty:
+            pass
+
+        # Update params if needed
+        if last_params is not None:
+            for player_module in player_modules_to_update_from_queue:
+                player_module.load_state_dict(last_params)
+
+        # Increment game tick
+        game_tick += 1
+
+        # Play games if necessary
+        n_games_played = 0
+        
+        for gr in game_runners:
+            if game_tick % gr.cfg.play_every == 0:
+                play_one_game(gr, players, episodes_q, rng, writer)
+                n_games_played += 1
+        
+        # Idle briefly if nothing to do
+        if last_params is None and n_games_played == 0:
+            time.sleep(0.001)
+    
+
+def logger(cfg: LoggerCfg, logs_q: Queue, stop_event: EventType):
+
+    # Initialize
+    writer = SummaryWriter() 
+
+    # Main loop
+    while not stop_event.is_set():
+        # Drain updates
+        updates = []
+        max_drain = 1000
+        try:
+            for i in range(max_drain):
+                updates.append(logs_q.get_nowait())
+        except queue.Empty:
+            pass
+
+        # Submit entries to summarywriter 
+        for method_name, args, kwargs in updates:
+            if method_name == "add_scalar":
+                writer.add_scalar(*args, **kwargs)
+            else:
+                raise NotImplementedError(f"Non-implemented logging function requested: {method_name}")
+
+        # Idle briefly if nothing to do
+        if len(updates) == 0:
+            time.sleep(0.001)
+
+def learner(cfg: LearnerCfg, 
+            params_q: Queue, 
+            episodes_q: Queue, 
+            logs_q: Queue,
+            stop_event: EventType):
+
+    # Create SummaryWriterProxy
+    writer: utils.SummaryWriterLike = utils.SummaryWriterProxy(logs_q)
+
+    # Initialize qfunction 
+    qfunction = load_qfunction(cfg.qfunction)
 
     # Initialize trainer
-    trainer = VanillaDQNTrainer(qfunction=qfunc, 
-                                buffer_size=10000,
-                                batch_size=128,
-                                step_length_distribution={1: 0.5, 2: 0.3, 3: 0.2},
-                                min_buffer_to_train=1000,
-                                train_every=1,
-                                learning_rate=1e-3,
-                                target_update_every=500,
-                                max_gradient_norm=5.0,
-                                gamma=0.99,
+    trainer = VanillaDQNTrainer(qfunction=qfunction, 
+                                buffer_size=cfg.replay_buffer_size,
+                                batch_size=cfg.batch_size,
+                                step_length_distribution=cfg.step_lengths,
+                                min_buffer_to_train=cfg.replay_buffer_min_to_train,
+                                train_every=cfg.train_every,
+                                learning_rate=cfg.learning_rate,
+                                target_update_every=cfg.target_update_every,
+                                max_gradient_norm=cfg.max_gradient_norm,
+                                gamma=cfg.gamma,
+                                start_tick = cfg.start_tick,
                                 writer=writer)
 
+    # Initialize tick counting variables
+    n_transitions_till_update = cfg.update_player_every
+    n_ticks = cfg.start_tick
+    max_ticks = cfg.max_ticks
+
+    # Main loop: 
+    while not stop_event.is_set() and n_ticks < max_ticks:
+        # Drain updates
+        updates: List[List[c4.Transition]] = []
+        max_drain = 1000
+        try:
+            for i in range(max_drain):
+                updates.append(episodes_q.get_nowait())
+        except queue.Empty:
+            pass
+
+        # Process entries by pushing episodes into trainer
+        for episode in updates:
+            trainer.add_episode(episode)
+            # This is not 100% accurate because of multi-step transitions
+            # But it doesn't matter, it's just for rough counting
+            n_ticks += len(episode)
+            n_transitions_till_update -= len(episode)
+            if n_transitions_till_update <= 0:
+                try:
+                    assert isinstance(trainer.qfunction, torch.nn.Module)
+                    params_q.put_nowait(trainer.qfunction.state_dict())
+                except queue.Full:
+                    print("Params queue is full. Skipping.")
+                while n_transitions_till_update < 0:
+                    n_transitions_till_update += cfg.update_player_every
+
+        # Idle briefly if nothing to do
+        if len(updates) == 0:
+            time.sleep(0.001)
 
 
-    # Disposable code for playing as human against an agent
-    #a1 = agents.NegamaxAgent(6,7,2)
-    #a2 = agents.HumanAgent()
-    #record: c4.C4GameRecord
-    #record, trans1, trans2 = c4.play_game(env, a1, a2, render=False, verbose=False)
-    #print(f"Winner: {record.winner}")
-    #print(f"Last move: {record.moves[-1]}")
-    #return
+@hydra.main(version_base=None, config_path="conf", config_name="config")
+def main(cfg: DictConfig):
+    # Create typed config object
+    typed_cfg = OmegaConf.merge(OmegaConf.structured(AppCfg), cfg)
+    appcfg: AppCfg = OmegaConf.to_object(typed_cfg)
 
-    with agents.HtmlQLLogger("game_log_greedy.html", append=False, max_games_to_write=1000, game_write_interval=100) as logger:
-        #a1 = agents.RandomAgent()
-        a1 = agents.NegamaxAgent(6,7,2)
-        a2 = agents.QAgent(qfunction=qfunc, action_picker=action_picker, logger=None)
-        a2_greedy = agents.QAgent(qfunction=qfunc, action_picker=greedy_action_picker, logger=logger)
+    # Set up three processes (learner, player, logger) and three queues (params, episodes, logs)
+    # Start all processes
+    # Join and send graceful termination signal via Event if ctrl+c captured
+    episodes, params, logs = Queue(), Queue(), Queue()
+    stop = Event()
+    A = Process(target=learner, args=(episodes, params, logs, stop))
+    B = Process(target=game_play_loop, args=(appcfg.game_play_loop, params, episodes, logs, stop))
+    C = Process(target=logger, args=(appcfg.logger, logs, stop))
 
-        num_games = 100000
-        recent_scores = RecentValuesRingBuffer(size=500)
-        recent_scores_greedy = RecentValuesRingBuffer(size=100)
-        recent_game_lengths = RecentValuesRingBuffer(size=100)
-        log_gamestats_every = 100
-        play_greedy_every = 5
+    procs = [A, B, C]
 
-        for game_idx in range(num_games):
-            #print(f"Starting game {game_idx+1}/{num_games}: ", end="")
-            result: c4.C4GameRecord
-            trans1: List[c4.Transition]
-            trans2: List[c4.Transition]
-            result, trans1, trans2 = c4.play_game(env, a1, a2, render=False, verbose=False)
-
-            # Track recent win rate for a1
-            a2_score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
-            recent_scores.add(a2_score)
-            recent_game_lengths.add(float(result.game_length()))
-
-            # Play game with greedy a2 every log_winrate_every games
-            if (game_idx % play_greedy_every) == 0 and game_idx > 0:
-                result_greedy, _, _ = c4.play_game(env, a1, a2_greedy, render=False, verbose=False)
-                a2_score_greedy = 1.0 if result_greedy.winner == c4.C4GameRoles.P1 else 0.0
-                recent_scores_greedy.add(a2_score_greedy)
-                avg_score_greedy = recent_scores_greedy.average_if_full()
-                writer.add_scalar("game/recent_avg_score_a2_greedy", avg_score_greedy, game_idx)
-
-            # Print game result
-            if (game_idx % log_gamestats_every) == 0 and game_idx > 0:
-                avg_score = recent_scores.average_if_full()
-                avg_game_length = recent_game_lengths.average_if_full()
-                writer.add_scalar("game/recent_avg_score_a1", avg_score, game_idx)
-                writer.add_scalar("game/recent_avg_game_length", avg_game_length, game_idx)
-                print(f"\rGame {game_idx}/{num_games}  recent avg score a1: {avg_score:.3f}      recent avg gamelen: {avg_game_length:.3f}        ", end="")
+    for p in procs: p.start()
+    try:
+        while True:
+            dead = [p for p in procs if p.exitcode is not None]
+            if dead:
+                # if any died abnormally, stop the rest
+                if any(p.exitcode != 0 for p in dead):
+                    stop.set()
+                for p in procs: p.join()
+                break
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        stop.set()
+        for p in procs: p.join()
 
 
-            # Feed transitions to trainer
-            trainer.add_episode(trans2)
+
+
 
 
 import cProfile, pstats, sys
 
+# Profiler initialization
 profiler = cProfile.Profile()
 profiler.enable()
+
 try:
-    main()  # your training loop
+    main()  
 except KeyboardInterrupt:
     print("Interrupted, writing profile...")
 finally:

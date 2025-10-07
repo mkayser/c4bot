@@ -1,0 +1,61 @@
+game_play_loop:
+  start_tick: 0
+  max_ticks: 10000
+  rng_seed: 42
+  game_runners:
+    - play_every: 1
+      pinned_player: dqn
+      opponent_pool: ["random"]
+      log_every: 100
+      writer_prefix: games/dqn
+      export_episodes: true
+    - play_every: 10
+      pinned_player: dqn_greedy
+      player_pool: ["random"]
+      log_every: 10
+      writer_prefix: games/dqn_greedy
+      export_episodes: false
+  players:
+    random:
+      type: RandomAgent
+      rng_seed: 42
+    negamax:
+      type: NegamaxAgent
+      h: 6
+      w: 7
+      search_depth: 4
+    dqn:
+      type: QAgent
+      update_from_queue: true
+      html_log_file: null
+      qfunction:
+        type: ConvNetQFunction
+        input_shape: [2,6,7]
+        num_actions: 7
+        device: cpu
+      action_picker: 
+        type: EpsilonGreedyPicker
+        epsilon: 
+          type: linear_schedule
+          start: 1.0
+          end: 0.1
+          steps: 100000
+        rng_seed: 42
+        writer_prefix: "agents/dqn/epsilon"
+    dqn_greedy:
+      type: QAgent
+      update_from_queue: true
+      html_log_file: "game_log_greedy.html"
+      qfunction:
+        type: ConvNetQFunction
+        input_shape: [2,6,7]
+        num_actions: 7
+        device: cpu
+      action_picker: 
+        type: EpsilonGreedyPicker
+        epsilon: 
+          type: fixed
+          value: 0.0
+        rng_seed: 42
+        writer_prefix: agents/dqn/epsilon
+
