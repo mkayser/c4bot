@@ -1,10 +1,10 @@
+from __future__ import annotations
 import numpy as np
 import json
 from multiprocessing import Queue
 from typing import Protocol, Any, Callable, List
 import queue
 import c4
-from __future__ import annotations
 
 
 

@@ -1,7 +1,7 @@
 import c4
 import agents
 from dqn import ConvNetQFunction, QFunction, VanillaDQNTrainer
-from typing import Any, Dict, List, Tuple, Union, Callable, Literal
+from typing import Any, Dict, List, Tuple, Union, Callable, Literal, Optional
 import numpy as np
 import torch
 import utils
@@ -15,6 +15,7 @@ from multiprocessing import Process, Queue, Event
 from multiprocessing.synchronize import Event as EventType
 import queue
 import time
+from enum import Enum
 
 
 
@@ -22,50 +23,53 @@ import time
 
 @dataclass
 class GameRunnerCfg:
-    play_every: int = 1
+    play_every: int
     pinned_player: str
     opponent_pool: List[str]
-    log_every: int = 100
+    log_every: int
     writer_prefix: str
-    export_episodes: bool = True
+    export_episodes: bool
 
 @dataclass 
 class RandomAgentCfg:
-    type: Literal["RandomAgent"] = "RandomAgent"
     rng_seed: int
 
 @dataclass 
 class NegamaxAgentCfg:
-    type: Literal["NegamaxAgent"] = "NegamaxAgent"
     h: int
     w: int
     search_depth: int
 
+class QFunctionType(str, Enum):
+    ConvNetQFunction="ConvNetQFunction"
+
 @dataclass
 class ConvNetQFunctionCfg:
-    type: Literal["ConvNetQFunction"] = "ConvNetQFunction"
     input_shape: List[int]
     num_actions: int
     device: str
+    type: QFunctionType = QFunctionType.ConvNetQFunction
 
 # Later can make this a union when there are other QFunctionCfg types
 QFunctionCfg = ConvNetQFunctionCfg
 
+class ActionPickerType(str, Enum):
+    EpsilonGreedyPicker="EpsilonGreedyPicker"
+
 @dataclass 
 class EpsilonGreedyPickerCfg:
-    type: Literal["EpsilonGreedyPicker"] = "EpsilonGreedyPicker"
-    epsilon: Dict[int, Any]
+    epsilon: Dict[str, Any]
     rng_seed: int
     writer_prefix: str
+    type: ActionPickerType = ActionPickerType.EpsilonGreedyPicker
 
 # Later can make this a union 
 ActionPickerCfg = EpsilonGreedyPickerCfg
 
 @dataclass
 class QAgentCfg:
-    type: Literal["QAgent"] = "QAgent"
     update_from_queue: bool
-    html_log_file: str
+    html_log_file: Optional[str]
     qfunction: QFunctionCfg
     action_picker: ActionPickerCfg
 
@@ -73,16 +77,16 @@ PlayerCfg = Union[RandomAgentCfg, NegamaxAgentCfg, QAgentCfg]
 
 @dataclass
 class GamePlayLoopCfg:
-    start_tick: int = 0  # Starting tick for the game loop
-    max_ticks: int = 10000  # Maximum ticks to run the game loop
+    start_tick: int  # Starting tick for the game loop
+    max_ticks: int  # Maximum ticks to run the game loop
     rng_seed: int
     game_runners: List[GameRunnerCfg]
-    players: Dict[str, PlayerCfg]  # List of player configurations
+    players: Dict[str, Any]
 
 @dataclass
 class LearnerCfg:
-    start_tick: int = 0
-    max_ticks: int = 100000
+    start_tick: int
+    max_ticks: int
     qfunction: QFunctionCfg
     step_lengths: Dict[int,float]
     replay_buffer_size: int
@@ -99,7 +103,7 @@ class LearnerCfg:
 
 @dataclass
 class LoggerCfg:
-    writer_prefix: str
+    writer_prefix: Optional[str]
 
 @dataclass
 class AppCfg:
@@ -109,6 +113,23 @@ class AppCfg:
 
 ####
 # Loader functions
+
+def normalize_player_configs(players_dc: DictConfig) -> DictConfig:
+    schema = {
+        "RandomAgent": RandomAgentCfg,
+        "NegamaxAgent": NegamaxAgentCfg,
+        "QAgent": QAgentCfg,
+    }
+    out = {}
+    for name, node in players_dc.items():
+        t = node.get("type")
+        cls = schema.get(t)
+        if not cls:
+            raise ValueError(f"unknown player type {t!r} at players.{name}")
+        raw = OmegaConf.to_container(node, resolve=False) or {}
+        raw.pop("type", None)
+        out[name] = OmegaConf.merge(OmegaConf.structured(cls), OmegaConf.create(raw))  # validates & fixes types
+    return OmegaConf.create(out)
 
 def load_qfunction(c: QFunctionCfg):
     if isinstance(c, ConvNetQFunctionCfg): return ConvNetQFunction(c.input_shape, c.num_actions, c.device)
@@ -174,7 +195,7 @@ def game_play_loop(cfg: GamePlayLoopCfg,
         # Pick players
         assert gr.cfg.pinned_player in players
         main_player = players[gr.cfg.pinned_player]
-        opponent = players[gr.cfg.opponent_pool]
+        opponent = players[rng.choice(gr.cfg.opponent_pool)]
         pinned_is_first = rng.integers(0,2)
 
         # Play game
@@ -224,7 +245,7 @@ def game_play_loop(cfg: GamePlayLoopCfg,
     for player_name, player_cfg in cfg.players.items():
         writer_prefix = f"players/{player_name}"
         players[player_name] = load_player(player_cfg, writer.with_tag_prefix(writer_prefix))
-        if player_cfg.update_from_queue:
+        if isinstance(player_cfg, QAgentCfg) and player_cfg.update_from_queue:
             assert isinstance(players[player_name], agents.QAgent)
             assert isinstance(players[player_name].qfunction, torch.nn.Module)
             player_modules_to_update_from_queue.append(players[player_name].qfunction)
@@ -365,6 +386,7 @@ def learner(cfg: LearnerCfg,
 def main(cfg: DictConfig):
     # Create typed config object
     typed_cfg = OmegaConf.merge(OmegaConf.structured(AppCfg), cfg)
+    typed_cfg.game_play_loop.players = normalize_player_configs(typed_cfg.game_play_loop.players)
     appcfg: AppCfg = OmegaConf.to_object(typed_cfg)
 
     # Set up three processes (learner, player, logger) and three queues (params, episodes, logs)
@@ -372,7 +394,7 @@ def main(cfg: DictConfig):
     # Join and send graceful termination signal via Event if ctrl+c captured
     episodes, params, logs = Queue(), Queue(), Queue()
     stop = Event()
-    A = Process(target=learner, args=(episodes, params, logs, stop))
+    A = Process(target=learner, args=(appcfg.learner, params, episodes, logs, stop))
     B = Process(target=game_play_loop, args=(appcfg.game_play_loop, params, episodes, logs, stop))
     C = Process(target=logger, args=(appcfg.logger, logs, stop))
 

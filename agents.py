@@ -86,7 +86,7 @@ class EpsilonGreedyPicker:
     def __init__(self, 
                  epsilon: float | Callable[[int], float], 
                  rng: np.random.Generator,
-                 writer: Optional[utils.SummaryWriterLike]]) = None:
+                 writer: Optional[utils.SummaryWriterLike] = None):
         self.epsilon = epsilon
         self.rng = rng
         self.writer = writer

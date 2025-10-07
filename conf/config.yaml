@@ -11,7 +11,7 @@ game_play_loop:
       export_episodes: true
     - play_every: 10
       pinned_player: dqn_greedy
-      player_pool: ["random"]
+      opponent_pool: ["random"]
       log_every: 10
       writer_prefix: games/dqn_greedy
       export_episodes: false
@@ -45,7 +45,7 @@ game_play_loop:
     dqn_greedy:
       type: QAgent
       update_from_queue: true
-      html_log_file: "game_log_greedy.html"
+      html_log_file: null
       qfunction:
         type: ConvNetQFunction
         input_shape: [2,6,7]
@@ -58,4 +58,26 @@ game_play_loop:
           value: 0.0
         rng_seed: 42
         writer_prefix: agents/dqn/epsilon
-
+learner:
+  start_tick: 0
+  max_ticks: 100000
+  qfunction:
+    type: ConvNetQFunction
+    input_shape: [2,6,7]
+    num_actions: 7
+    device: cuda
+  step_lengths:
+    1: 0.5
+    2: 0.3
+    3: 0.2
+  replay_buffer_size: 10000
+  replay_buffer_min_to_train: 1000
+  batch_size: 128
+  learning_rate: 1e-3
+  train_every: 1
+  target_update_every: 500
+  update_player_every: 100
+  max_gradient_norm: 5.0
+  gamma: 0.99
+logger: 
+  writer_prefix: null
