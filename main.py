@@ -91,6 +91,8 @@ class LearnerCfg:
     step_lengths: Dict[int,float]
     replay_buffer_size: int
     replay_buffer_min_to_train: int
+    max_ratio_of_train_steps_to_transitions: float
+    max_idle_training_steps: int
     batch_size: int
     learning_rate: float
     train_every: int
@@ -349,13 +351,22 @@ def learner(cfg: LearnerCfg,
                                 start_tick = cfg.start_tick,
                                 writer=writer)
 
+    # Assert values in range
+    assert 1.0 <= cfg.max_ratio_of_train_steps_to_transitions 
+
     # Initialize tick counting variables
-    n_transitions_till_update = cfg.update_player_every
-    n_ticks = cfg.start_tick
-    max_ticks = cfg.max_ticks
+    n_transitions_till_player_update = cfg.update_player_every
+    n_transitions = cfg.start_tick
+    max_transitions = cfg.max_ticks
+    max_ratio = cfg.max_ratio_of_train_steps_to_transitions
+    max_idle_training_steps = cfg.max_idle_training_steps
+
+    # We set n_training_steps assuming no "backlog" of idle training steps
+    n_training_steps = n_transitions * max_ratio
+
 
     # Main loop: 
-    while not stop_event.is_set() and n_ticks < max_ticks:
+    while not stop_event.is_set() and n_transitions < max_transitions:
         # Drain updates
         updates: List[List[c4.Transition]] = []
         max_drain = 1000
@@ -370,20 +381,29 @@ def learner(cfg: LearnerCfg,
             trainer.add_episode(episode)
             # This is not 100% accurate because of multi-step transitions
             # But it doesn't matter, it's just for rough counting
-            n_ticks += len(episode)
-            n_transitions_till_update -= len(episode)
-            if n_transitions_till_update <= 0:
+            n_transitions += len(episode)
+            n_training_steps += len(episode)
+            n_transitions_till_player_update -= len(episode)
+            if n_transitions_till_player_update <= 0:
                 try:
                     assert isinstance(trainer.qfunction, torch.nn.Module)
                     params_q.put_nowait(trainer.qfunction.state_dict())
                 except queue.Full:
                     print("Params queue is full. Skipping.")
-                while n_transitions_till_update < 0:
-                    n_transitions_till_update += cfg.update_player_every
+                while n_transitions_till_player_update < 0:
+                    n_transitions_till_player_update += cfg.update_player_every
 
-        # Idle briefly if nothing to do
+        # If nothing else to do, do "idle training"
         if len(updates) == 0:
-            time.sleep(0.001)
+            if n_training_steps < n_transitions * max_ratio:
+                for i in range(max_idle_training_steps):
+                    if n_training_steps < n_transitions * max_ratio:
+                        trainer.train()
+                        n_training_steps += 1
+
+            else:
+                # If no idle training left, sleep
+                time.sleep(0.001)
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")

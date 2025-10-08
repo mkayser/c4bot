@@ -5,7 +5,7 @@ game_play_loop:
   game_runners:
     - play_every: 1
       pinned_player: dqn
-      opponent_pool: ["random"]
+      opponent_pool: ["negamax"]
       log_every: 100
       writer_prefix: games/dqn
       export_episodes: true
@@ -39,13 +39,13 @@ game_play_loop:
           type: linear_schedule
           start: 1.0
           end: 0.1
-          steps: 100000
+          steps: 50000
         rng_seed: 42
         writer_prefix: "agents/dqn/epsilon"
     dqn_greedy:
       type: QAgent
       update_from_queue: true
-      html_log_file: null
+      html_log_file: html_game_log.greedy.html
       qfunction:
         type: ConvNetQFunction
         input_shape: [2,6,7]
@@ -70,8 +70,10 @@ learner:
     1: 0.5
     2: 0.3
     3: 0.2
-  replay_buffer_size: 10000
+  replay_buffer_size: 20000
   replay_buffer_min_to_train: 1000
+  max_ratio_of_train_steps_to_transitions: 5.0
+  max_idle_training_steps: 20
   batch_size: 128
   learning_rate: 1e-3
   train_every: 1
