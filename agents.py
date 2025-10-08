@@ -33,6 +33,28 @@ class RandomAgent(Agent):
         pass
 
 
+# --- A trivial baseline agent ------------------------------------------------
+class AlwaysPlayFixedColumnAgent(Agent):
+    def __init__(self, column: int):
+        self.column = column
+
+    def start_game(self, player_id: str) -> None:
+        pass
+          
+    def act(self, obs: np.ndarray, action_mask: np.ndarray):
+        assert self.column < action_mask.size
+        if action_mask[self.column]:
+            return self.column
+        else:
+            # backoff: choose leftmost legal move
+            legal_moves = np.flatnonzero(action_mask)
+            assert legal_moves.size > 0
+            return int(legal_moves[0])
+    
+    def end_game(self) -> None:
+        pass
+
+
 # --- Mostly random but plays forced wins -----
 class RandomC3AgentWithForcedWins(Agent):
     def __init__(self, seed: Optional[int] = None):

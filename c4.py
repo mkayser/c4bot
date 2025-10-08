@@ -71,10 +71,11 @@ def initialize_env():
     env = c4env.env(render_mode="ansi")  # text render, no pygame window
     env = observation_lambda_v0(env, change_obs, change_space)
 
-    print("render_mode seen by wrapper:", getattr(env, "render_mode", None))
+    #print("render_mode seen by wrapper:", getattr(env, "render_mode", None))
     try:
-        print("base render_mode:", env.unwrapped.render_mode)
-        print("supported modes:", getattr(env.unwrapped, "metadata", {}).get("render_modes"))
+        pass
+        #print("base render_mode:", env.unwrapped.render_mode)
+        #print("supported modes:", getattr(env.unwrapped, "metadata", {}).get("render_modes"))
     except Exception:
         pass
     return env

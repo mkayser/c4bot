@@ -1,17 +1,17 @@
 game_play_loop:
   start_tick: 0
-  max_ticks: 100000
+  max_ticks: 300000
   rng_seed: 42
   game_runners:
     - play_every: 1
       pinned_player: dqn
-      opponent_pool: ["negamax"]
+      opponent_pool: ["always0"]
       log_every: 100
       writer_prefix: games/dqn
       export_episodes: true
     - play_every: 10
       pinned_player: dqn_greedy
-      opponent_pool: ["random"]
+      opponent_pool: ["always0"]
       log_every: 10
       writer_prefix: games/dqn_greedy
       export_episodes: false
@@ -19,11 +19,20 @@ game_play_loop:
     random:
       type: RandomAgent
       rng_seed: 42
+    always0:
+      type: AlwaysPlayFixedColumnAgent
+      column: 0
+    always1:
+      type: AlwaysPlayFixedColumnAgent
+      column: 1
+    always2:
+      type: AlwaysPlayFixedColumnAgent
+      column: 2
     negamax:
       type: NegamaxAgent
       h: 6
       w: 7
-      search_depth: 4
+      search_depth: 2
     dqn:
       type: QAgent
       update_from_queue: true
@@ -39,7 +48,7 @@ game_play_loop:
           type: linear_schedule
           start: 1.0
           end: 0.1
-          steps: 50000
+          steps: 150000
         rng_seed: 42
         writer_prefix: "agents/dqn/epsilon"
     dqn_greedy:
@@ -60,7 +69,7 @@ game_play_loop:
         writer_prefix: agents/dqn/epsilon
 learner:
   start_tick: 0
-  max_ticks: 200000
+  max_ticks: 500000
   qfunction:
     type: ConvNetQFunction
     input_shape: [2,6,7]
@@ -70,16 +79,16 @@ learner:
     1: 0.5
     2: 0.3
     3: 0.2
-  replay_buffer_size: 20000
+  replay_buffer_size: 10000
   replay_buffer_min_to_train: 1000
-  max_ratio_of_train_steps_to_transitions: 5.0
-  max_idle_training_steps: 20
-  batch_size: 128
+  max_ratio_of_train_steps_to_transitions: 1.0
+  max_idle_training_steps: 100
+  batch_size: 256
   learning_rate: 1e-3
   train_every: 1
-  target_update_every: 500
+  target_update_every: 1000
   update_player_every: 100
-  max_gradient_norm: 5.0
-  gamma: 0.99
+  max_gradient_norm: 1.0
+  gamma: 0.9
 logger: 
   writer_prefix: null

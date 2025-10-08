@@ -16,7 +16,7 @@ from multiprocessing.synchronize import Event as EventType
 import queue
 import time
 from enum import Enum
-
+import signal
 
 
 # Hydra config classes
@@ -33,6 +33,11 @@ class GameRunnerCfg:
 @dataclass 
 class RandomAgentCfg:
     rng_seed: int
+
+@dataclass 
+class AlwaysPlayFixedColumnAgentCfg:
+    column: int
+
 
 @dataclass 
 class NegamaxAgentCfg:
@@ -73,7 +78,7 @@ class QAgentCfg:
     qfunction: QFunctionCfg
     action_picker: ActionPickerCfg
 
-PlayerCfg = Union[RandomAgentCfg, NegamaxAgentCfg, QAgentCfg]
+PlayerCfg = Union[RandomAgentCfg, NegamaxAgentCfg, QAgentCfg, AlwaysPlayFixedColumnAgentCfg]
 
 @dataclass
 class GamePlayLoopCfg:
@@ -119,6 +124,7 @@ class AppCfg:
 def normalize_player_configs(players_dc: DictConfig) -> DictConfig:
     schema = {
         "RandomAgent": RandomAgentCfg,
+        "AlwaysPlayFixedColumnAgent": AlwaysPlayFixedColumnAgentCfg,
         "NegamaxAgent": NegamaxAgentCfg,
         "QAgent": QAgentCfg,
     }
@@ -151,8 +157,12 @@ def load_action_picker(c: ActionPickerCfg, writer: utils.SummaryWriterLike):
     raise NotImplementedError(f"{c} configures an action picker that is not implemented")
 
 def load_player(c: PlayerCfg, writer: utils.SummaryWriterLike):
-    if isinstance(c, RandomAgentCfg): return agents.RandomAgent(c.rng_seed)
-    if isinstance(c, NegamaxAgentCfg): return agents.NegamaxAgent(c.h, c.w, c.search_depth)
+    if isinstance(c, RandomAgentCfg): 
+        return agents.RandomAgent(c.rng_seed)
+    if isinstance(c, AlwaysPlayFixedColumnAgentCfg): 
+        return agents.AlwaysPlayFixedColumnAgent(c.column)
+    if isinstance(c, NegamaxAgentCfg): 
+        return agents.NegamaxAgent(c.h, c.w, c.search_depth)
     if isinstance(c, QAgentCfg): 
         if c.html_log_file:
             html_logger = agents.HtmlQLLogger(c.html_log_file)
@@ -173,6 +183,10 @@ class GameRunnerState:
     num_games_played: int
     recent_scores: utils.RecentValuesRingBuffer
     recent_game_lengths: utils.RecentValuesRingBuffer
+
+
+def install_child_sigint_ignorer():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def game_play_loop(cfg: GamePlayLoopCfg, 
                    params_q: Queue, 
@@ -238,67 +252,80 @@ def game_play_loop(cfg: GamePlayLoopCfg,
             writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_score", avg_score, gr.num_games_played)
             writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_game_length", avg_game_length, gr.num_games_played)
 
-    # Initialize environment
-    env = c4.initialize_env()
-    env.reset()  # Need to reset before querying spaces
+    try:
+        # Ignore Ctrl+c
+        install_child_sigint_ignorer()
 
-    # Create SummaryWriterProxy
-    writer: utils.SummaryWriterLike = utils.SummaryWriterProxy(logs_q)
+        # Initialize environment
+        env = c4.initialize_env()
+        env.reset()  # Need to reset before querying spaces
 
-    # Create players
-    players: Dict[str, agents.Agent] = {}
-    player_modules_to_update_from_queue: List[torch.nn.Module] = []
-    for player_name, player_cfg in cfg.players.items():
-        writer_prefix = f"players/{player_name}"
-        players[player_name] = load_player(player_cfg, writer.with_tag_prefix(writer_prefix))
-        if isinstance(player_cfg, QAgentCfg) and player_cfg.update_from_queue:
-            assert isinstance(players[player_name], agents.QAgent)
-            assert isinstance(players[player_name].qfunction, torch.nn.Module)
-            player_modules_to_update_from_queue.append(players[player_name].qfunction)
+        # Create SummaryWriterProxy
+        writer: utils.SummaryWriterLike = utils.SummaryWriterProxy(logs_q)
 
-    # Create game runners
-    game_runners: List[GameRunnerState] = []
-    for game_runner_cfg in cfg.game_runners:
-        game_runners.append(load_game_runner(game_runner_cfg))
+        # Create players
+        players: Dict[str, agents.Agent] = {}
+        player_modules_to_update_from_queue: List[torch.nn.Module] = []
+        for player_name, player_cfg in cfg.players.items():
+            writer_prefix = f"players/{player_name}"
+            players[player_name] = load_player(player_cfg, writer.with_tag_prefix(writer_prefix))
+            if isinstance(player_cfg, QAgentCfg) and player_cfg.update_from_queue:
+                assert isinstance(players[player_name], agents.QAgent)
+                assert isinstance(players[player_name].qfunction, torch.nn.Module)
+                player_modules_to_update_from_queue.append(players[player_name].qfunction)
 
-    # Initialize state
-    max_ticks = cfg.max_ticks
-    rng = np.random.default_rng(cfg.rng_seed)
+        # Create game runners
+        game_runners: List[GameRunnerState] = []
+        for game_runner_cfg in cfg.game_runners:
+            game_runners.append(load_game_runner(game_runner_cfg))
 
-    # Main loop
-    game_tick = 0
-    while not stop_event.is_set() and game_tick < max_ticks:
-        
-        # Drain param updates (keep only last)
-        last_params = None
+        # Initialize state
+        max_ticks = cfg.max_ticks
+        rng = np.random.default_rng(cfg.rng_seed)
+
+        # Main loop
+        game_tick = 0
+        while (not stop_event.is_set()) and game_tick < max_ticks:
+            # Drain param updates (keep only last)
+            last_params = None
+            try:
+                while True:
+                    last_params = params_q.get_nowait()
+            except queue.Empty:
+                pass
+
+            # Update params if needed
+            if last_params is not None:
+                for player_module in player_modules_to_update_from_queue:
+                    player_module.load_state_dict(last_params)
+
+            # Increment game tick
+            game_tick += 1
+
+            # Play games if necessary
+            n_games_played = 0
+            
+            for gr in game_runners:
+                if game_tick % gr.cfg.play_every == 0:
+                    play_one_game(gr, players, episodes_q, rng, writer)
+                    n_games_played += 1
+            
+            # Idle briefly if nothing to do
+            if last_params is None and n_games_played == 0:
+                time.sleep(0.001)
+    finally:
+        # If we're done, cleanup queues we were producing to
         try:
-            while True:
-                last_params = params_q.get_nowait()
-        except queue.Empty:
+            logs_q.cancel_join_thread()
+            episodes_q.cancel_join_thread()
+        except Exception:
             pass
-
-        # Update params if needed
-        if last_params is not None:
-            for player_module in player_modules_to_update_from_queue:
-                player_module.load_state_dict(last_params)
-
-        # Increment game tick
-        game_tick += 1
-
-        # Play games if necessary
-        n_games_played = 0
-        
-        for gr in game_runners:
-            if game_tick % gr.cfg.play_every == 0:
-                play_one_game(gr, players, episodes_q, rng, writer)
-                n_games_played += 1
-        
-        # Idle briefly if nothing to do
-        if last_params is None and n_games_played == 0:
-            time.sleep(0.001)
     
 
 def logger(cfg: LoggerCfg, logs_q: Queue, stop_event: EventType):
+
+    # Ignore Ctrl+c
+    install_child_sigint_ignorer()
 
     # Initialize
     writer = SummaryWriter() 
@@ -330,6 +357,9 @@ def learner(cfg: LearnerCfg,
             episodes_q: Queue, 
             logs_q: Queue,
             stop_event: EventType):
+
+    # Ignore Ctrl+c
+    install_child_sigint_ignorer()
 
     # Create SummaryWriterProxy
     writer: utils.SummaryWriterLike = utils.SummaryWriterProxy(logs_q)
@@ -406,6 +436,7 @@ def learner(cfg: LearnerCfg,
                 time.sleep(0.001)
 
 
+
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig):
     # Create typed config object
@@ -418,30 +449,34 @@ def main(cfg: DictConfig):
     # Join and send graceful termination signal via Event if ctrl+c captured
     episodes, params, logs = Queue(), Queue(), Queue()
     stop = Event()
-    A = Process(target=learner, args=(appcfg.learner, params, episodes, logs, stop))
-    B = Process(target=game_play_loop, args=(appcfg.game_play_loop, params, episodes, logs, stop))
-    C = Process(target=logger, args=(appcfg.logger, logs, stop))
+    A = Process(name="learner", target=learner, args=(appcfg.learner, params, episodes, logs, stop))
+    B = Process(name="game_play_loop", target=game_play_loop, args=(appcfg.game_play_loop, params, episodes, logs, stop))
+    C = Process(name="logger", target=logger, args=(appcfg.logger, logs, stop))
 
     procs = [A, B, C]
+    finite_runtime_procs = [A, B]
+    finished_procs = []
 
     for p in procs: p.start()
     try:
-        while True:
-            dead = [p for p in procs if p.exitcode is not None]
-            if dead:
-                # if any died abnormally, stop the rest
-                if any(p.exitcode != 0 for p in dead):
-                    stop.set()
-                for p in procs: p.join()
-                break
-            time.sleep(0.1)
-    except KeyboardInterrupt:
-        stop.set()
-        for p in procs: p.join()
+        while len(finished_procs) < len(finite_runtime_procs):
+            finished_procs = [p for p in procs if p.exitcode is not None]
+            # if any died abnormally, stop the rest
+            for p in finished_procs:
+                if p.exitcode != 0:
+                    print(f"Process '{p._start_method}' has exited with errors.")
+                raise Exception("Child process terminated with errors.")
+            else:
+                time.sleep(0.1)
     finally:
         stop.set()
-        for p in procs: p.join()
-
+        print("Shutting down...")
+        for p in procs: p.join(timeout=5)
+        # If any are still alive, terminate hard
+        for p in procs:
+            if p.is_alive(): 
+                print(f"Timeout expired for process '{p.name}'. Killing...")
+                p.terminate()
 
 
 
