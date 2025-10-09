@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+
 import c4
 import agents
 from dqn import ConvNetQFunction, QFunction, VanillaDQNTrainer
@@ -358,82 +361,91 @@ def learner(cfg: LearnerCfg,
             logs_q: Queue,
             stop_event: EventType):
 
-    # Ignore Ctrl+c
-    install_child_sigint_ignorer()
+    try:
+        # Ignore Ctrl+c
+        install_child_sigint_ignorer()
 
-    # Create SummaryWriterProxy
-    writer: utils.SummaryWriterLike = utils.SummaryWriterProxy(logs_q)
+        # Create SummaryWriterProxy
+        writer: utils.SummaryWriterLike = utils.SummaryWriterProxy(logs_q)
 
-    # Initialize qfunction 
-    qfunction = load_qfunction(cfg.qfunction)
+        # Initialize qfunction 
+        qfunction = load_qfunction(cfg.qfunction)
 
-    # Initialize trainer
-    trainer = VanillaDQNTrainer(qfunction=qfunction, 
-                                buffer_size=cfg.replay_buffer_size,
-                                batch_size=cfg.batch_size,
-                                step_length_distribution=cfg.step_lengths,
-                                min_buffer_to_train=cfg.replay_buffer_min_to_train,
-                                train_every=cfg.train_every,
-                                learning_rate=cfg.learning_rate,
-                                target_update_every=cfg.target_update_every,
-                                max_gradient_norm=cfg.max_gradient_norm,
-                                gamma=cfg.gamma,
-                                start_tick = cfg.start_tick,
-                                writer=writer)
+        # Initialize trainer
+        trainer = VanillaDQNTrainer(qfunction=qfunction, 
+                                    buffer_size=cfg.replay_buffer_size,
+                                    batch_size=cfg.batch_size,
+                                    step_length_distribution=cfg.step_lengths,
+                                    min_buffer_to_train=cfg.replay_buffer_min_to_train,
+                                    train_every=cfg.train_every,
+                                    learning_rate=cfg.learning_rate,
+                                    target_update_every=cfg.target_update_every,
+                                    max_gradient_norm=cfg.max_gradient_norm,
+                                    gamma=cfg.gamma,
+                                    start_tick = cfg.start_tick,
+                                    writer=writer)
 
-    # Assert values in range
-    assert 1.0 <= cfg.max_ratio_of_train_steps_to_transitions 
+        # Assert values in range
+        assert 1.0 <= cfg.max_ratio_of_train_steps_to_transitions 
 
-    # Initialize tick counting variables
-    n_transitions_till_player_update = cfg.update_player_every
-    n_transitions = cfg.start_tick
-    max_transitions = cfg.max_ticks
-    max_ratio = cfg.max_ratio_of_train_steps_to_transitions
-    max_idle_training_steps = cfg.max_idle_training_steps
+        # Initialize tick counting variables
+        n_transitions_till_player_update = cfg.update_player_every
+        n_transitions = cfg.start_tick
+        max_transitions = cfg.max_ticks
+        max_ratio = cfg.max_ratio_of_train_steps_to_transitions
+        max_idle_training_steps = cfg.max_idle_training_steps
 
-    # We set n_training_steps assuming no "backlog" of idle training steps
-    n_training_steps = n_transitions * max_ratio
+        # We set n_training_steps assuming no "backlog" of idle training steps
+        n_training_steps = n_transitions * max_ratio
 
 
-    # Main loop: 
-    while not stop_event.is_set() and n_transitions < max_transitions:
-        # Drain updates
-        updates: List[List[c4.Transition]] = []
-        max_drain = 1000
+        # Main loop: 
+        while not stop_event.is_set() and n_transitions < max_transitions:
+            # Drain updates
+            updates: List[List[c4.Transition]] = []
+            max_drain = 1000
+            try:
+                for i in range(max_drain):
+                    updates.append(episodes_q.get_nowait())
+            except queue.Empty:
+                pass
+
+            # Process entries by pushing episodes into trainer
+            for episode in updates:
+                trainer.add_episode(episode)
+                # This is not 100% accurate because of multi-step transitions
+                # But it doesn't matter, it's just for rough counting
+                n_transitions += len(episode)
+                n_training_steps += len(episode)
+                n_transitions_till_player_update -= len(episode)
+                if n_transitions_till_player_update <= 0:
+                    try:
+                        assert isinstance(trainer.qfunction, torch.nn.Module)
+                        params_q.put_nowait(trainer.qfunction.state_dict())
+                    except queue.Full:
+                        print("Params queue is full. Skipping.")
+                    while n_transitions_till_player_update < 0:
+                        n_transitions_till_player_update += cfg.update_player_every
+
+            # If nothing else to do, do "idle training"
+            if len(updates) == 0:
+                if n_training_steps < n_transitions * max_ratio:
+                    for i in range(max_idle_training_steps):
+                        if n_training_steps < n_transitions * max_ratio:
+                            trainer.train()
+                            n_training_steps += 1
+
+                else:
+                    # If no idle training left, sleep
+                    time.sleep(0.001)
+    finally:
+        # If we're done, cleanup queues we were producing to
         try:
-            for i in range(max_drain):
-                updates.append(episodes_q.get_nowait())
-        except queue.Empty:
+            logs_q.cancel_join_thread()
+            params_q.cancel_join_thread()
+        except Exception:
             pass
 
-        # Process entries by pushing episodes into trainer
-        for episode in updates:
-            trainer.add_episode(episode)
-            # This is not 100% accurate because of multi-step transitions
-            # But it doesn't matter, it's just for rough counting
-            n_transitions += len(episode)
-            n_training_steps += len(episode)
-            n_transitions_till_player_update -= len(episode)
-            if n_transitions_till_player_update <= 0:
-                try:
-                    assert isinstance(trainer.qfunction, torch.nn.Module)
-                    params_q.put_nowait(trainer.qfunction.state_dict())
-                except queue.Full:
-                    print("Params queue is full. Skipping.")
-                while n_transitions_till_player_update < 0:
-                    n_transitions_till_player_update += cfg.update_player_every
-
-        # If nothing else to do, do "idle training"
-        if len(updates) == 0:
-            if n_training_steps < n_transitions * max_ratio:
-                for i in range(max_idle_training_steps):
-                    if n_training_steps < n_transitions * max_ratio:
-                        trainer.train()
-                        n_training_steps += 1
-
-            else:
-                # If no idle training left, sleep
-                time.sleep(0.001)
 
 
 
@@ -487,6 +499,7 @@ import cProfile, pstats, sys
 # Profiler initialization
 profiler = cProfile.Profile()
 profiler.enable()
+
 
 try:
     main()  
