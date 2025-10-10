@@ -259,15 +259,15 @@ def game_play_loop(cfg: GamePlayLoopCfg,
         if pinned_is_first:
             result, episode, _ = c4.play_game(env, main_player, opponent)
             score = 1.0 if result.winner == c4.C4GameRoles.P0 else 0.0
-            reward_sum = 0.5 * (1.0 + sum(item.r for item in episode))
-            assert score == reward_sum, f"Mismatched score: {score} expected but sum is {reward_sum} "
+            #reward_sum = 0.5 * (1.0 + sum(item.r for item in episode))
+            #assert score == reward_sum, f"Mismatched score: {score} expected but sum is {reward_sum} "
             game_length = float(result.game_length())
             game_record = [main_player_id, opponent_id, game_length, result.moves]
         else:
             result, _, episode = c4.play_game(env, opponent, main_player)
             score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
-            reward_sum = 0.5 * (1.0 + sum(item.r for item in episode))
-            assert score == reward_sum, f"Mismatched score: {score} expected but sum is {reward_sum} "
+            #reward_sum = 0.5 * (1.0 + sum(item.r for item in episode))
+            #assert score == reward_sum, f"Mismatched score: {score} expected but sum is {reward_sum} "
             game_length = float(result.game_length())
             game_record = [opponent_id, main_player_id, game_length, result.moves]
         

@@ -5,7 +5,7 @@ game_play_loop:
   game_runners:
     - play_every: 1
       pinned_player: dqn
-      opponent_pool: ["always0", "always1", "always2", "always3", "always4", "always5", "always6"]
+      opponent_pool: ["negamax"]
       log_every: 100
       dump_games_every: null
       dump_games_location: null
@@ -13,9 +13,9 @@ game_play_loop:
       export_episodes: true
     - play_every: 10
       pinned_player: dqn_greedy
-      opponent_pool: ["always0", "always1", "always2", "always3", "always4", "always5", "always6"]
+      opponent_pool: ["negamax"]
       log_every: 10
-      dump_games_every: 10
+      dump_games_every: 1000
       dump_games_location: games/${now:%Y-%m-%d_%H-%M-%S}
       writer_prefix: games/dqn_greedy
       export_episodes: false
