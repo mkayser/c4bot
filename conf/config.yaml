@@ -53,6 +53,8 @@ game_play_loop:
       type: QAgent
       update_from_queue: true
       html_log_file: null
+      html_log_max_games: null
+      html_log_game_write_interval: null
       qfunction:
         type: ConvNetQFunction
         input_shape: [2,6,7]
@@ -72,6 +74,8 @@ game_play_loop:
       type: QAgent
       update_from_queue: true
       html_log_file: html_game_log.greedy.html
+      html_log_max_games: 1000
+      html_log_game_write_interval: 10
       qfunction:
         type: ConvNetQFunction
         input_shape: [2,6,7]
@@ -95,9 +99,7 @@ learner:
     load_from: null
     device: cuda
   step_lengths:
-    1: 0.5
-    2: 0.3
-    3: 0.2
+    1: 1.0
   replay_buffer_size: 10000
   replay_buffer_min_to_train: 1000
   max_ratio_of_train_steps_to_transitions: 1.0

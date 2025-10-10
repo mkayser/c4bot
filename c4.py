@@ -210,4 +210,8 @@ def play_game(
     agent0.end_game()
     agent1.end_game()
 
+    assert sum(item.r for item in transitions[P0]) == r0
+    assert sum(item.r for item in transitions[P1]) == r1
+    assert abs(len(transitions[P0]) - len(transitions[P1])) <= 1
+
     return record, transitions[P0], transitions[P1]

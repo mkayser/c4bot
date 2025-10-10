@@ -84,6 +84,8 @@ ActionPickerCfg = EpsilonGreedyPickerCfg
 class QAgentCfg:
     update_from_queue: bool
     html_log_file: Optional[str]
+    html_log_max_games: Optional[int]
+    html_log_game_write_interval: Optional[int]
     qfunction: QFunctionCfg
     action_picker: ActionPickerCfg
 
@@ -181,7 +183,9 @@ def load_player(c: PlayerCfg, writer: utils.SummaryWriterLike):
         return agents.NegamaxAgent(c.h, c.w, c.search_depth)
     if isinstance(c, QAgentCfg): 
         if c.html_log_file:
-            html_logger = agents.HtmlQLLogger(c.html_log_file)
+            html_logger = agents.HtmlQLLogger(c.html_log_file, 
+                                              max_games_to_write=c.html_log_max_games, 
+                                              game_write_interval=c.html_log_game_write_interval)
             html_logger.__enter__()
         else:
             html_logger = None
@@ -189,7 +193,12 @@ def load_player(c: PlayerCfg, writer: utils.SummaryWriterLike):
     raise NotImplementedError(f"{c} configures an agent that is not implemented")
     
 def load_game_runner(c: GameRunnerCfg):
-    return GameRunnerState(c, 0, utils.RecentValuesRingBuffer(), utils.RecentValuesRingBuffer())
+    return GameRunnerState(c, 
+                           0, 
+                           utils.RecentValuesRingBuffer(), 
+                           utils.RecentValuesRingBuffer(), 
+                           utils.RingBuffer(), 
+                           utils.RecentValuesRingBuffer(), 0.0)
 
 ####
 
@@ -200,6 +209,8 @@ class GameRunnerState:
     recent_scores: utils.RecentValuesRingBuffer
     recent_game_lengths: utils.RecentValuesRingBuffer
     recent_games: utils.RingBuffer
+    recent_nonzero_transition_rewards: utils.RecentValuesRingBuffer
+    total_reward: float
 
 
 def install_child_sigint_ignorer():
@@ -248,11 +259,15 @@ def game_play_loop(cfg: GamePlayLoopCfg,
         if pinned_is_first:
             result, episode, _ = c4.play_game(env, main_player, opponent)
             score = 1.0 if result.winner == c4.C4GameRoles.P0 else 0.0
+            reward_sum = 0.5 * (1.0 + sum(item.r for item in episode))
+            assert score == reward_sum, f"Mismatched score: {score} expected but sum is {reward_sum} "
             game_length = float(result.game_length())
             game_record = [main_player_id, opponent_id, game_length, result.moves]
         else:
             result, _, episode = c4.play_game(env, opponent, main_player)
             score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
+            reward_sum = 0.5 * (1.0 + sum(item.r for item in episode))
+            assert score == reward_sum, f"Mismatched score: {score} expected but sum is {reward_sum} "
             game_length = float(result.game_length())
             game_record = [opponent_id, main_player_id, game_length, result.moves]
         
@@ -267,14 +282,21 @@ def game_play_loop(cfg: GamePlayLoopCfg,
         gr.recent_scores.add(score)
         gr.recent_game_lengths.add(game_length)
         gr.recent_games.add(game_record)
+        for tr in episode:
+            if tr.r != 0.0:
+                gr.recent_nonzero_transition_rewards.add(tr.r)
+        gr.total_reward += sum(tr.r for tr in episode)
         gr.num_games_played += 1
 
         # Log result
         if (gr.num_games_played % gr.cfg.log_every) == 0:
             avg_score = gr.recent_scores.average_if_full()
             avg_game_length = gr.recent_game_lengths.average_if_full()
+            avg_recent_nz_tr_rw = gr.recent_nonzero_transition_rewards.average_if_full()
             writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_score", avg_score, gr.num_games_played)
             writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_game_length", avg_game_length, gr.num_games_played)
+            writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_nz_tr_rw", avg_recent_nz_tr_rw, gr.num_games_played)
+            writer.add_scalar(f"{gr.cfg.writer_prefix}/total_reward", gr.total_reward, gr.num_games_played)
         
         if (gr.cfg.dump_games_every is not None) and (gr.cfg.dump_games_location is not None):
             if (gr.num_games_played % gr.cfg.dump_games_every) == 0:
@@ -437,6 +459,10 @@ def learner(cfg: LearnerCfg,
         max_ratio = cfg.max_ratio_of_train_steps_to_transitions
         max_idle_training_steps = cfg.max_idle_training_steps
 
+        total_reward = 0.0
+        write_debug_every = 100
+        n_transitions_till_write_debug = 100
+
         # We set n_training_steps assuming no "backlog" of idle training steps
         n_training_steps = n_transitions * max_ratio
 
@@ -454,12 +480,20 @@ def learner(cfg: LearnerCfg,
 
             # Process entries by pushing episodes into trainer
             for episode in updates:
+                total_reward += sum(tr.r for tr in episode)
                 trainer.add_episode(episode)
                 # This is not 100% accurate because of multi-step transitions
                 # But it doesn't matter, it's just for rough counting
                 n_transitions += len(episode)
                 n_training_steps += len(episode)
                 n_transitions_till_player_update -= len(episode)
+                n_transitions_till_write_debug -= len(episode)
+
+                if n_transitions_till_write_debug <= 0:
+                    writer.add_scalar("debug/learner_total_reward", total_reward, n_transitions)
+                    while n_transitions_till_write_debug < 0:
+                        n_transitions_till_write_debug += write_debug_every
+
                 if n_transitions_till_player_update <= 0:
                     try:
                         assert isinstance(trainer.qfunction, torch.nn.Module)

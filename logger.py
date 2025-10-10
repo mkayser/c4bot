@@ -79,16 +79,14 @@ class HtmlQLLogger:
         if self.writing_current_game:
             self.num_games_written += 1
             self.writing_current_game = False
+            self._f.write(f"<tr><td colspan='{self.num_columns}' class='meta'></td></tr>\n")
+            self._f.flush()
 
         if self.num_games_written >= self.max_games_to_write:
             return
         
         if not self._f:
             raise RuntimeError("Logger not opened. Use 'with HtmlQLLogger(...) as log:'")
-        
-        self._f.write(f"<tr><td colspan='{self.num_columns}' class='meta'></td></tr>\n")
-        self._f.flush()
-
 
     def add_row(self, 
                 step: int, 

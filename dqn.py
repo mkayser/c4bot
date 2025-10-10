@@ -344,6 +344,7 @@ class VanillaDQNTrainer(Trainer):
         self.criterion = nn.SmoothL1Loss(beta=1.0, reduction='mean')
         self.writer = writer
         self.log_every = log_every
+        self.recent_transition_rewards = utils.RecentValuesRingBuffer(size=100)
 
         assert self.min_buffer_to_train <= self.buffer_size
         assert self.train_every > 0
@@ -411,7 +412,11 @@ class VanillaDQNTrainer(Trainer):
 
     def _add_transition(self, tr: c4.Transition) -> None:
         self.replay_buffer.add(tr)
+        if tr.r != 0.0:
+            self.recent_transition_rewards.add(tr.r)
         self.step_count += 1
+        if self.step_count % 50:
+            self.writer.add_scalar("debug/recent_nonzero_transition_reward_avg", self.recent_transition_rewards.average_if_full(), self.step_count)
         if self.step_count > self.min_buffer_to_train and self.step_count % self.train_every == 0:
             self.train()
         if self.step_count % self.save_every == 0:
@@ -479,6 +484,8 @@ class VanillaDQNTrainer(Trainer):
             # Debug metrics: done and reward mean in batch, tick for target hard update
             self.writer.add_scalar("debug/done_mean",  done_batch.float().mean().item(), self.train_step_count)
             self.writer.add_scalar("debug/r_mean",     r_batch.mean().item(), self.train_step_count)
+            self.writer.add_scalar("debug/r_pct_neg",     (r_batch < -0.01).float().mean().item(), self.train_step_count)
+            self.writer.add_scalar("debug/r_pct_pos",     (r_batch > 0.01).float().mean().item(), self.train_step_count)
             self.writer.add_scalar("debug/target_hard_update", int(self.train_step_count % self.target_update_every == 0), self.train_step_count)
 
 
