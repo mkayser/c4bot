@@ -5,14 +5,18 @@ game_play_loop:
   game_runners:
     - play_every: 1
       pinned_player: dqn
-      opponent_pool: ["always0"]
+      opponent_pool: ["always0", "always1", "always2", "always3", "always4", "always5", "always6"]
       log_every: 100
+      dump_games_every: null
+      dump_games_location: null
       writer_prefix: games/dqn
       export_episodes: true
     - play_every: 10
       pinned_player: dqn_greedy
-      opponent_pool: ["always0"]
+      opponent_pool: ["always0", "always1", "always2", "always3", "always4", "always5", "always6"]
       log_every: 10
+      dump_games_every: 10
+      dump_games_location: games/${now:%Y-%m-%d_%H-%M-%S}
       writer_prefix: games/dqn_greedy
       export_episodes: false
   players:
@@ -28,6 +32,18 @@ game_play_loop:
     always2:
       type: AlwaysPlayFixedColumnAgent
       column: 2
+    always3:
+      type: AlwaysPlayFixedColumnAgent
+      column: 3
+    always4:
+      type: AlwaysPlayFixedColumnAgent
+      column: 4
+    always5:
+      type: AlwaysPlayFixedColumnAgent
+      column: 5
+    always6:
+      type: AlwaysPlayFixedColumnAgent
+      column: 6
     negamax:
       type: NegamaxAgent
       h: 6
@@ -41,6 +57,7 @@ game_play_loop:
         type: ConvNetQFunction
         input_shape: [2,6,7]
         num_actions: 7
+        load_from: null
         device: cpu
       action_picker: 
         type: EpsilonGreedyPicker
@@ -59,6 +76,7 @@ game_play_loop:
         type: ConvNetQFunction
         input_shape: [2,6,7]
         num_actions: 7
+        load_from: null
         device: cpu
       action_picker: 
         type: EpsilonGreedyPicker
@@ -74,6 +92,7 @@ learner:
     type: ConvNetQFunction
     input_shape: [2,6,7]
     num_actions: 7
+    load_from: null
     device: cuda
   step_lengths:
     1: 0.5
@@ -86,6 +105,8 @@ learner:
   batch_size: 256
   learning_rate: 1e-3
   train_every: 1
+  save_every: 1000
+  save_location: checkpoints/${now:%Y-%m-%d_%H-%M-%S}
   target_update_every: 1000
   update_player_every: 100
   max_gradient_norm: 1.0

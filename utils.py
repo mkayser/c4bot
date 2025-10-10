@@ -5,6 +5,9 @@ from multiprocessing import Queue
 from typing import Protocol, Any, Callable, List
 import queue
 import c4
+import torch
+import os
+from urllib.parse import urlparse
 
 
 
@@ -73,8 +76,49 @@ class RecentValuesRingBuffer:
             return 0.0
         return self.sum / self.size
 
+class RingBuffer:
+    def __init__(self, size: int = 100):
+        self.size = size
+        self.buffer = []
+        self.index = 0
+
+    def add(self, item: Any):
+        if(len(self.buffer) < self.size):
+            self.buffer.append(item)
+        else:
+            assert len(self.buffer) == self.size
+            assert 0 <= self.index < self.size
+            self.buffer[self.index] = item
+            self.index = (self.index + 1) % self.size
+
+    def get_all(self):
+        return self.buffer
+
+
 def print_transition(tr: c4.Transition) -> None:
     print(f"STATE {tr.a} {tr.r} STATE2 {tr.mask} {tr.mask2}")
 
 
+# Model loader
+def load_model_state_dict(url: str, map_location: str):
+    result = urlparse(url)
+    assert result.scheme == ""
+    state_dict = torch.load(result.path)
+    return state_dict
+
+
+# Model saver
+
+class ModelSaver(Protocol):
+    def save_model(self, model:torch.nn.Module, tick: int) -> None: ...
+
+
+class LocalModelSaver(ModelSaver):
+    def __init__(self, save_dir: str):
+        self.save_dir = save_dir
+        os.makedirs(save_dir, exist_ok=True)
+
+    def save_model(self, model: torch.nn.Module, tick: int):
+        output_file_name = f"{self.save_dir}/model.{tick:06d}.pth"
+        torch.save(model.state_dict(), output_file_name)
 

@@ -38,7 +38,9 @@ class QFunction(Protocol):
 #class ToyQFunction:
 
 class ConvNetQFunction(nn.Module):
-    def __init__(self, input_shape: Tuple[int, ...], num_actions: int, device: torch.device | str = "cpu"):
+    def __init__(self, input_shape: Tuple[int, ...], 
+                 num_actions: int, 
+                 device: torch.device | str = "cpu"):
         super().__init__()
         c, h, w = input_shape
         assert c == 2 and h == 6 and w == 7, f"Unexpected input shape {input_shape}"
@@ -306,6 +308,8 @@ class VanillaDQNTrainer(Trainer):
                  step_length_distribution: Dict[int, float] = {1: 1.0},
                  gamma: float = 0.99,
                  target_update_every: int = 100,
+                 save_every: Optional[int] = 1000,
+                 model_saver: Optional[utils.ModelSaver] = None,
                  optimizer: Optional[torch.optim.Optimizer] = None,
                  learning_rate: float = 1e-3,
                  max_gradient_norm: float = 10.0,
@@ -331,6 +335,8 @@ class VanillaDQNTrainer(Trainer):
         self.learning_rate = learning_rate
         self.max_gradient_norm = max_gradient_norm
         self.target_update_every = target_update_every
+        self.save_every = save_every
+        self.model_saver = model_saver
         self.step_count = start_tick
         self.train_step_count = 0
         self.replay_buffer = TransitionReplayBuffer(buffer_size, qfunction.input_shape, qfunction.num_actions)
@@ -408,6 +414,9 @@ class VanillaDQNTrainer(Trainer):
         self.step_count += 1
         if self.step_count > self.min_buffer_to_train and self.step_count % self.train_every == 0:
             self.train()
+        if self.step_count % self.save_every == 0:
+            assert isinstance(self.qfunction, torch.nn.Module)
+            self.model_saver.save_model(self.qfunction, self.step_count)
 
     def train(self) -> None:
         # Only train if we have enough samples

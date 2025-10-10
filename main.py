@@ -20,6 +20,9 @@ import queue
 import time
 from enum import Enum
 import signal
+from urllib.parse import urlparse
+import os
+import json
 
 
 # Hydra config classes
@@ -29,6 +32,8 @@ class GameRunnerCfg:
     play_every: int
     pinned_player: str
     opponent_pool: List[str]
+    dump_games_every: Optional[int]
+    dump_games_location: Optional[str]
     log_every: int
     writer_prefix: str
     export_episodes: bool
@@ -56,6 +61,7 @@ class ConvNetQFunctionCfg:
     input_shape: List[int]
     num_actions: int
     device: str
+    load_from: Optional[str]
     type: QFunctionType = QFunctionType.ConvNetQFunction
 
 # Later can make this a union when there are other QFunctionCfg types
@@ -104,6 +110,8 @@ class LearnerCfg:
     batch_size: int
     learning_rate: float
     train_every: int
+    save_every: Optional[int]
+    save_location: Optional[str]
     target_update_every: int
     update_player_every: int
     max_gradient_norm: float
@@ -143,7 +151,12 @@ def normalize_player_configs(players_dc: DictConfig) -> DictConfig:
     return OmegaConf.create(out)
 
 def load_qfunction(c: QFunctionCfg):
-    if isinstance(c, ConvNetQFunctionCfg): return ConvNetQFunction(c.input_shape, c.num_actions, c.device)
+    if isinstance(c, ConvNetQFunctionCfg): 
+        qfunction = ConvNetQFunction(c.input_shape, c.num_actions, c.device)
+        if c.load_from is not None:
+            state_dict = utils.load_model_state_dict(c.load_from, c.device)
+            qfunction.load_state_dict(state_dict)
+        return qfunction
     raise TypeError(f"Unsupported QFunctionCfg: {type(c).__name__}")
 
 def load_epsilon_schedule(d: Dict[str, Any]):
@@ -186,6 +199,7 @@ class GameRunnerState:
     num_games_played: int
     recent_scores: utils.RecentValuesRingBuffer
     recent_game_lengths: utils.RecentValuesRingBuffer
+    recent_games: utils.RingBuffer
 
 
 def install_child_sigint_ignorer():
@@ -217,8 +231,11 @@ def game_play_loop(cfg: GamePlayLoopCfg,
         
         # Pick players
         assert gr.cfg.pinned_player in players
-        main_player = players[gr.cfg.pinned_player]
-        opponent = players[rng.choice(gr.cfg.opponent_pool)]
+        main_player_id = gr.cfg.pinned_player
+        opponent_id = rng.choice(gr.cfg.opponent_pool)
+
+        main_player = players[main_player_id]
+        opponent = players[opponent_id]
         pinned_is_first = rng.integers(0,2)
 
         # Play game
@@ -226,15 +243,18 @@ def game_play_loop(cfg: GamePlayLoopCfg,
         episode: List[c4.Transition]
         score: float
         game_length: int
+        game_record: Tuple[str, str, int, List[int]]
 
         if pinned_is_first:
             result, episode, _ = c4.play_game(env, main_player, opponent)
             score = 1.0 if result.winner == c4.C4GameRoles.P0 else 0.0
             game_length = float(result.game_length())
+            game_record = [main_player_id, opponent_id, game_length, result.moves]
         else:
             result, _, episode = c4.play_game(env, opponent, main_player)
             score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
             game_length = float(result.game_length())
+            game_record = [opponent_id, main_player_id, game_length, result.moves]
         
         # Export episode
         if gr.cfg.export_episodes:
@@ -246,6 +266,7 @@ def game_play_loop(cfg: GamePlayLoopCfg,
         # Update stats
         gr.recent_scores.add(score)
         gr.recent_game_lengths.add(game_length)
+        gr.recent_games.add(game_record)
         gr.num_games_played += 1
 
         # Log result
@@ -254,6 +275,18 @@ def game_play_loop(cfg: GamePlayLoopCfg,
             avg_game_length = gr.recent_game_lengths.average_if_full()
             writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_score", avg_score, gr.num_games_played)
             writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_game_length", avg_game_length, gr.num_games_played)
+        
+        if (gr.cfg.dump_games_every is not None) and (gr.cfg.dump_games_location is not None):
+            if (gr.num_games_played % gr.cfg.dump_games_every) == 0:
+                output_file_name = f"{gr.cfg.dump_games_location}/games.{gr.num_games_played:07d}.jsonl"
+                os.makedirs(gr.cfg.dump_games_location, exist_ok=True)
+                with open(output_file_name, "w") as fout:
+                    game_records = gr.recent_games.get_all()
+                    for game_record in game_records:
+                        json.dump(game_record, fout)
+                        fout.write("\n")
+            
+
 
     try:
         # Ignore Ctrl+c
@@ -371,6 +404,13 @@ def learner(cfg: LearnerCfg,
         # Initialize qfunction 
         qfunction = load_qfunction(cfg.qfunction)
 
+        # Initialize model saver if needed
+        saver = None
+        if cfg.save_every is not None and cfg.save_location is not None:
+            result = urlparse(cfg.save_location)
+            assert result.scheme == ""
+            saver = utils.LocalModelSaver(cfg.save_location)
+
         # Initialize trainer
         trainer = VanillaDQNTrainer(qfunction=qfunction, 
                                     buffer_size=cfg.replay_buffer_size,
@@ -378,6 +418,8 @@ def learner(cfg: LearnerCfg,
                                     step_length_distribution=cfg.step_lengths,
                                     min_buffer_to_train=cfg.replay_buffer_min_to_train,
                                     train_every=cfg.train_every,
+                                    save_every=cfg.save_every,
+                                    model_saver=saver,
                                     learning_rate=cfg.learning_rate,
                                     target_update_every=cfg.target_update_every,
                                     max_gradient_norm=cfg.max_gradient_norm,
