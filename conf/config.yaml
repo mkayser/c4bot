@@ -4,16 +4,16 @@ game_play_loop:
   rng_seed: 42
   game_runners:
     - play_every: 1
-      pinned_player: dqn
-      opponent_pool: ["negamax"]
+      pinned_player: negamaxbb
+      opponent_pool: ["always3"]
       log_every: 100
       dump_games_every: null
       dump_games_location: null
       writer_prefix: games/dqn
       export_episodes: true
     - play_every: 10
-      pinned_player: dqn_greedy
-      opponent_pool: ["negamax"]
+      pinned_player: negamaxbb
+      opponent_pool: ["always3"]
       log_every: 10
       dump_games_every: 1000
       dump_games_location: games/${now:%Y-%m-%d_%H-%M-%S}
@@ -49,6 +49,11 @@ game_play_loop:
       h: 6
       w: 7
       search_depth: 2
+    negamaxbb:
+      type: NegamaxBBAgent
+      h: 6
+      w: 7
+      search_depth: 4
     dqn:
       type: QAgent
       update_from_queue: true
@@ -106,7 +111,7 @@ learner:
   max_idle_training_steps: 100
   batch_size: 256
   learning_rate: 1e-3
-  train_every: 1
+  train_every: 6
   save_every: 1000
   save_location: checkpoints/${now:%Y-%m-%d_%H-%M-%S}
   target_update_every: 1000

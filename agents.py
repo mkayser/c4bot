@@ -151,7 +151,8 @@ class NegamaxAgent(Agent):
         board_state = (obs[0] - obs[1]).astype(np.int8)
         c4env = minimax.C4Env(self.h, self.w, self.connect_goal, board_state)
         return minimax.negamax_best_action(c4env, self.search_depth, self.board_evaluator)
-    
+
+
 class HumanAgent(Agent):
     def __init__(self):
         pass

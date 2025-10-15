@@ -3,6 +3,7 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated", categor
 
 import c4
 import agents
+import bbagents
 from dqn import ConvNetQFunction, QFunction, VanillaDQNTrainer
 from typing import Any, Dict, List, Tuple, Union, Callable, Literal, Optional
 import numpy as np
@@ -53,6 +54,12 @@ class NegamaxAgentCfg:
     w: int
     search_depth: int
 
+@dataclass 
+class NegamaxBBAgentCfg:
+    h: int
+    w: int
+    search_depth: int
+
 class QFunctionType(str, Enum):
     ConvNetQFunction="ConvNetQFunction"
 
@@ -89,7 +96,7 @@ class QAgentCfg:
     qfunction: QFunctionCfg
     action_picker: ActionPickerCfg
 
-PlayerCfg = Union[RandomAgentCfg, NegamaxAgentCfg, QAgentCfg, AlwaysPlayFixedColumnAgentCfg]
+PlayerCfg = Union[RandomAgentCfg, NegamaxAgentCfg, NegamaxBBAgentCfg, QAgentCfg, AlwaysPlayFixedColumnAgentCfg]
 
 @dataclass
 class GamePlayLoopCfg:
@@ -139,6 +146,7 @@ def normalize_player_configs(players_dc: DictConfig) -> DictConfig:
         "RandomAgent": RandomAgentCfg,
         "AlwaysPlayFixedColumnAgent": AlwaysPlayFixedColumnAgentCfg,
         "NegamaxAgent": NegamaxAgentCfg,
+        "NegamaxBBAgent": NegamaxBBAgentCfg,
         "QAgent": QAgentCfg,
     }
     out = {}
@@ -181,6 +189,8 @@ def load_player(c: PlayerCfg, writer: utils.SummaryWriterLike):
         return agents.AlwaysPlayFixedColumnAgent(c.column)
     if isinstance(c, NegamaxAgentCfg): 
         return agents.NegamaxAgent(c.h, c.w, c.search_depth)
+    if isinstance(c, NegamaxBBAgentCfg): 
+        return bbagents.NegamaxBBAgent(c.h, c.w, c.search_depth)
     if isinstance(c, QAgentCfg): 
         if c.html_log_file:
             html_logger = agents.HtmlQLLogger(c.html_log_file, 
@@ -471,7 +481,8 @@ def learner(cfg: LearnerCfg,
         while not stop_event.is_set() and n_transitions < max_transitions:
             # Drain updates
             updates: List[List[c4.Transition]] = []
-            max_drain = 1000
+            max_drain = 50
+            writer.add_scalar("debug/learner_queue_length", episodes_q.qsize(), n_transitions)
             try:
                 for i in range(max_drain):
                     updates.append(episodes_q.get_nowait())
