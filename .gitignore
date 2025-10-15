@@ -3,7 +3,12 @@ __pycache__
 game_log.html
 *.html
 runs/
+checkpoints/
+games/
 profile.out
 .venv
 .vscode
 outputs/
+*.o
+*.so
+negamax_bb_tester
