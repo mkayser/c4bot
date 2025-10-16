@@ -8,6 +8,8 @@
 #include <stdbool.h>  // bool
 #include <limits.h>   // INT_MIN/INT_MAX
 #include <assert.h>   // assert
+#include <stdio.h>
+#include <stdarg.h>
 
 // --- Compile-time board constants ---
 enum {
@@ -17,28 +19,42 @@ enum {
 };
 
 // Column mask helpers.
-#define COL_MASK(c)     (UINT64_C(0x7F) << ((c) * BITS_PER_COL))     /* 7 bits in column c */
-#define BOTTOM_MASK(c)  (UINT64_C(1)    << ((c) * BITS_PER_COL))     /* bottom cell of column c */
-#define TOP_MASK(c)     (UINT64_C(1)    << ((c) * BITS_PER_COL + 6)) /* sentinel bit of column c */
+#define COL_MASK(c)       (UINT64_C(0x7F) << ((c) * BITS_PER_COL))       /* 7 bits in column c */
+#define BOTTOM_MASK(c)    (UINT64_C(1)    << ((c) * BITS_PER_COL))       /* bottom cell of column c */
+#define TOP_CELL_MASK(c)  (UINT64_C(1)    << ((c) * BITS_PER_COL + (HEIGHT - 1)))
+#define SENTINEL_MASK(c)  (UINT64_C(1)    << ((c) * BITS_PER_COL + HEIGHT))
 
 // --- Public API (C ABI) ---
 #ifdef __cplusplus
 extern "C" {
 #endif
-int _best_move(uint64_t me, uint64_t opp, int depth);  /* Entry point: return column [0..6] */
-int best_move(uint64_t me, uint64_t opp, int depth);   /* Alias for convenience/ABI stability */
+int _best_move(uint64_t me, uint64_t opp, int depth, Logger *log);  /* Entry point: return column [0..6] */
+int best_move(uint64_t me, uint64_t opp, int depth, Logger *log);   /* Alias for convenience/ABI stability */
+int best_move_no_log(uint64_t me, uint64_t opp, int depth);   /* Alias for convenience/ABI stability */
+void nb_log(Logger *l, const char *fmt, ...);
 #ifdef __cplusplus
 }
 #endif
 
+// Debug logger
+
+void nb_log(Logger *l, const char *fmt, ...) {
+    if (!l || !l->f) return;
+    for (int i=0;i<l->indent;i++) fputc(' ', l->f);
+    va_list ap; va_start(ap, fmt);
+    vfprintf(l->f, fmt, ap);
+    fprintf(l->f, "\n");
+    va_end(ap);
+}
+
 // --- Core helpers (decls) ---
 static inline uint64_t board_mask(uint64_t me, uint64_t opp);     /* me|opp */
-static inline bool is_playable(uint64_t mask, int col);           /* !(mask & TOP_MASK(col)) */
+static inline bool is_playable(uint64_t mask, int col);           /* !(mask & TOP_CELL_MASK(col)) */
 static inline uint64_t drop(uint64_t player, uint64_t mask, int col); /* toggle the target bit into player */
 static bool has_won(uint64_t bb);
 static int generate_moves(uint64_t mask, int moves_out[WIDTH]);   /* returns count */
 static int evaluate(uint64_t me, uint64_t opp);
-static int negamax(uint64_t me, uint64_t opp, int depth, int alpha, int beta);
+static int negamax(uint64_t me, uint64_t opp, int depth, int alpha, int beta, Logger *log);
 
 // --- Small utils needed by evaluate() ---
 static inline int popcnt64(uint64_t x) {
@@ -55,6 +71,7 @@ static inline int count_k(uint64_t bb, int d, int k) {
     return popcnt64(m);
 }
 
+
 // --- Definitions ---
 
 // Weights: tweak as you like.
@@ -65,7 +82,7 @@ static inline int count_k(uint64_t bb, int d, int k) {
 
 static const int ORDER[7] = {3,4,2,5,1,6,0};  // center-first
 
-int _best_move(uint64_t me, uint64_t opp, int depth) {
+int _best_move(uint64_t me, uint64_t opp, int depth, Logger *log) {
     uint64_t mask = board_mask(me, opp);
     int moves[WIDTH], n = generate_moves(mask, moves);
     if (n == 0) return -1;  // draw/no legal
@@ -80,9 +97,15 @@ int _best_move(uint64_t me, uint64_t opp, int depth) {
         uint64_t me2  = me  ^ move;     // place
 
         // One-ply winning move shortcut.
-        if (has_won(me2)) return c;
+        if (has_won(me2)) {
+            if(log) nb_log(log, "Immediate win: %d", c);
+            return c;
+        }
 
-        int score = -negamax(opp, me2, depth - 1, -beta, -alpha);
+        if(log) nb_log(log, "[Move: %d]", c);
+        int score = -negamax(opp, me2, depth - 1, -beta, -alpha, log);
+        if(log) nb_log(log, "[Score of [%d]: %d]", c, score);
+
 
         if (score > best_score) { best_score = score; best_col = c; }
         if (score > alpha) alpha = score;
@@ -90,8 +113,12 @@ int _best_move(uint64_t me, uint64_t opp, int depth) {
     return best_col;
 }
 
-int best_move(uint64_t me, uint64_t opp, int depth) {
-    return _best_move(me, opp, depth);
+int best_move(uint64_t me, uint64_t opp, int depth, Logger *log) {
+    return _best_move(me, opp, depth, log);
+}
+
+int best_move_no_log(uint64_t me, uint64_t opp, int depth) {
+    return _best_move(me, opp, depth, NULL);
 }
 
 static inline uint64_t board_mask(uint64_t me, uint64_t opp) {
@@ -100,7 +127,7 @@ static inline uint64_t board_mask(uint64_t me, uint64_t opp) {
 
 static inline bool is_playable(uint64_t mask, int col) {
     assert(col >= 0 && col < WIDTH);
-    return (mask & TOP_MASK(col)) == 0;
+    return (mask & TOP_CELL_MASK(col)) == 0;
 }
 
 static inline uint64_t drop(uint64_t player, uint64_t mask, int col) {
@@ -121,7 +148,7 @@ static int generate_moves(uint64_t mask, int out[7]) {
     int n = 0;
     for (int k = 0; k < 7; ++k) {
         int c = ORDER[k];
-        if ((mask & TOP_MASK(c)) == 0) out[n++] = c;
+        if ((mask & TOP_CELL_MASK(c)) == 0) out[n++] = c;
     }
     return n;
 }
@@ -140,7 +167,7 @@ static int evaluate(uint64_t me, uint64_t opp) {
     op3 += count_k(opp, H, 3) + count_k(opp, V, 3) + count_k(opp, D1, 3) + count_k(opp, D2, 3);
     op2 += count_k(opp, H, 2) + count_k(opp, V, 2) + count_k(opp, D1, 2) + count_k(opp, D2, 2);
 
-    uint64_t center_mask = COL_MASK(3) & ~TOP_MASK(3);
+    uint64_t center_mask = COL_MASK(3) & ~SENTINEL_MASK(3);
     int my_center  = popcnt64(me  & center_mask);
     int opp_center = popcnt64(opp & center_mask);
 
@@ -152,14 +179,34 @@ static int evaluate(uint64_t me, uint64_t opp) {
     return score;
 }
 
-static int negamax(uint64_t me, uint64_t opp, int depth, int alpha, int beta) {
+static int negamax(uint64_t me, uint64_t opp, int depth, int alpha, int beta, Logger *log) {
+    if(log) nb_log(log, "{");
+    if(log) log->indent += 3;
+
     // If the previous player just made a connect-4, it's a loss for us.
-    if (has_won(opp)) return -W_WIN;
-    if (depth == 0)   return evaluate(me, opp);
+    if (has_won(opp)) {
+        if(log) nb_log(log, "[opponent wins]");
+        if(log) log->indent -= 3;
+        if(log) nb_log(log, "}");
+
+        return -W_WIN;
+    }
+    if (depth == 0)   {
+        int score = evaluate(me, opp);
+        if(log) nb_log(log, "evaluate()=%d", score);
+        if(log) log->indent -= 3;
+        if(log) nb_log(log, "}");
+        return score;
+    }
 
     uint64_t mask = board_mask(me, opp);
     int moves[WIDTH], n = generate_moves(mask, moves);
-    if (n == 0) return 0;  // draw
+    if (n == 0) {
+        if(log) nb_log(log, "[draw]");
+        if(log) log->indent -= 3;
+        if(log) nb_log(log, "}");
+        return 0;  // draw
+    }
 
     int best = -INT_MAX/2;
 
@@ -170,14 +217,34 @@ static int negamax(uint64_t me, uint64_t opp, int depth, int alpha, int beta) {
         uint64_t mask2= mask | move;
         (void)mask2; // mask2 is only needed to recompute child's moves; we rebuild from me2|opp below.
 
+        if(log) nb_log(log, "[Play %d]", c);
+
         // Immediate win shortcut.
-        if (has_won(me2)) return W_WIN;
+        if (has_won(me2)) {
+            if(log) nb_log(log, "[I win]");
+            if(log) log->indent -= 3;
+            if(log) nb_log(log, "}");
+            return W_WIN;
+        }
 
-        int score = -negamax(opp, me2, depth - 1, -beta, -alpha);
+        int score = -negamax(opp, me2, depth - 1, -beta, -alpha, log);
 
-        if (score > best) best = score;
-        if (score > alpha) alpha = score;
-        if (alpha >= beta) break;  // alpha-beta cutoff
+        if(log) nb_log(log, "score=%d", score);
+
+        if (score > best) {
+            if(log) nb_log(log, "best: (%d -> %d)", best, score);
+            best = score;
+        }
+        if (score > alpha) {
+            if(log) nb_log(log, "alpha: (%d -> %d)", alpha, score);
+            alpha = score;
+        }
+        if (alpha >= beta) {
+            if(log) nb_log(log, "alpha>=beta cutoff: (%d >= %d)", alpha, beta);
+            break;  // alpha-beta cutoff
+        }
     }
+    if(log) log->indent -= 3;
+    if(log) nb_log(log, "} best=%d", best);
     return best;
 }

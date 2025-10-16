@@ -5,9 +5,14 @@ import ctypes as C
 
 
 _lib = C.CDLL("./libnegamaxbb.so")
-_best_move = _lib.best_move
+_best_move = _lib.best_move_no_log
 _best_move.argtypes = (C.c_uint64, C.c_uint64, C.c_int)
 _best_move.restype  = C.c_int
+
+_SENTINEL_MASK = 0
+for _col in range(7):
+    _SENTINEL_MASK |= 1 << (_col * 7 + 6)
+
 
 def _to_bitboards(board_state: np.ndarray) -> tuple[int,int]:
     """
@@ -25,6 +30,11 @@ def _to_bitboards(board_state: np.ndarray) -> tuple[int,int]:
             bit = 1 << (c * 7 + r)
             if v > 0: me  |= bit
             else:     opp |= bit
+    # Sentinel bits must stay clear; a set sentinel would fabricate vertical wins.
+    me  &= ~_SENTINEL_MASK
+    opp &= ~_SENTINEL_MASK
+    assert (me & _SENTINEL_MASK) == 0
+    assert (opp & _SENTINEL_MASK) == 0
     return me, opp
 
 class NegamaxBBAgent(Agent):
@@ -46,6 +56,5 @@ class NegamaxBBAgent(Agent):
 
         # Safety: honor mask (engine should already avoid full cols)
         legal = np.flatnonzero(action_mask).tolist()
-        if col not in legal:
-            col = legal[0] if legal else -1
+        assert col in legal, f"Illegal column for board state: {obs}"
         return col
