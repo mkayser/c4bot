@@ -85,6 +85,7 @@ static const int ORDER[7] = {3,4,2,5,1,6,0};  // center-first
 int _best_move(uint64_t me, uint64_t opp, int depth, Logger *log) {
     uint64_t mask = board_mask(me, opp);
     int moves[WIDTH], n = generate_moves(mask, moves);
+
     if (n == 0) return -1;  // draw/no legal
 
     int best_col = moves[0];
@@ -98,18 +99,18 @@ int _best_move(uint64_t me, uint64_t opp, int depth, Logger *log) {
 
         // One-ply winning move shortcut.
         if (has_won(me2)) {
-            if(log) nb_log(log, "Immediate win: %d", c);
+            if(log && log->verbosity > 0) nb_log(log, "Immediate win: %d", c);
             return c;
         }
-
-        if(log) nb_log(log, "[Move: %d]", c);
+        if(log && log->verbosity > 1) nb_log(log, "[Move: %d]", c);
         int score = -negamax(opp, me2, depth - 1, -beta, -alpha, log);
-        if(log) nb_log(log, "[Score of [%d]: %d]", c, score);
+        if(log && log->verbosity > 0) nb_log(log, "[Score of [%d]: %d]", c, score);
 
 
         if (score > best_score) { best_score = score; best_col = c; }
         if (score > alpha) alpha = score;
     }
+    if(log && log->verbosity > 0) nb_log(log, "[Best move: [%d]: %d]", best_col, best_score);
     return best_col;
 }
 
@@ -180,31 +181,31 @@ static int evaluate(uint64_t me, uint64_t opp) {
 }
 
 static int negamax(uint64_t me, uint64_t opp, int depth, int alpha, int beta, Logger *log) {
-    if(log) nb_log(log, "{");
-    if(log) log->indent += 3;
+    if(log && log->verbosity > 1) nb_log(log, "{");
+    if(log && log->verbosity > 1) log->indent += 3;
 
     // If the previous player just made a connect-4, it's a loss for us.
     if (has_won(opp)) {
-        if(log) nb_log(log, "[opponent wins]");
-        if(log) log->indent -= 3;
-        if(log) nb_log(log, "}");
+        if(log && log->verbosity > 1) nb_log(log, "[opponent wins]");
+        if(log && log->verbosity > 1) log->indent -= 3;
+        if(log && log->verbosity > 1) nb_log(log, "}");
 
         return -W_WIN;
     }
     if (depth == 0)   {
         int score = evaluate(me, opp);
-        if(log) nb_log(log, "evaluate()=%d", score);
-        if(log) log->indent -= 3;
-        if(log) nb_log(log, "}");
+        if(log && log->verbosity > 1) nb_log(log, "evaluate()=%d", score);
+        if(log && log->verbosity > 1) log->indent -= 3;
+        if(log && log->verbosity > 1) nb_log(log, "}");
         return score;
     }
 
     uint64_t mask = board_mask(me, opp);
     int moves[WIDTH], n = generate_moves(mask, moves);
     if (n == 0) {
-        if(log) nb_log(log, "[draw]");
-        if(log) log->indent -= 3;
-        if(log) nb_log(log, "}");
+        if(log && log->verbosity > 1) nb_log(log, "[draw]");
+        if(log && log->verbosity > 1) log->indent -= 3;
+        if(log && log->verbosity > 1) nb_log(log, "}");
         return 0;  // draw
     }
 
@@ -217,34 +218,34 @@ static int negamax(uint64_t me, uint64_t opp, int depth, int alpha, int beta, Lo
         uint64_t mask2= mask | move;
         (void)mask2; // mask2 is only needed to recompute child's moves; we rebuild from me2|opp below.
 
-        if(log) nb_log(log, "[Play %d]", c);
+        if(log && log->verbosity > 1) nb_log(log, "[Play %d]", c);
 
         // Immediate win shortcut.
         if (has_won(me2)) {
-            if(log) nb_log(log, "[I win]");
-            if(log) log->indent -= 3;
-            if(log) nb_log(log, "}");
+            if(log && log->verbosity > 1) nb_log(log, "[I win]");
+            if(log && log->verbosity > 1) log->indent -= 3;
+            if(log && log->verbosity > 1) nb_log(log, "}");
             return W_WIN;
         }
 
         int score = -negamax(opp, me2, depth - 1, -beta, -alpha, log);
 
-        if(log) nb_log(log, "score=%d", score);
+        if(log && log->verbosity > 1) nb_log(log, "score=%d", score);
 
         if (score > best) {
-            if(log) nb_log(log, "best: (%d -> %d)", best, score);
+            if(log && log->verbosity > 1) nb_log(log, "best: (%d -> %d)", best, score);
             best = score;
         }
         if (score > alpha) {
-            if(log) nb_log(log, "alpha: (%d -> %d)", alpha, score);
+            if(log && log->verbosity > 1) nb_log(log, "alpha: (%d -> %d)", alpha, score);
             alpha = score;
         }
         if (alpha >= beta) {
-            if(log) nb_log(log, "alpha>=beta cutoff: (%d >= %d)", alpha, beta);
+            if(log && log->verbosity > 1) nb_log(log, "alpha>=beta cutoff: (%d >= %d)", alpha, beta);
             break;  // alpha-beta cutoff
         }
     }
-    if(log) log->indent -= 3;
-    if(log) nb_log(log, "} best=%d", best);
+    if(log && log->verbosity > 1) log->indent -= 3;
+    if(log && log->verbosity > 1) nb_log(log, "} best=%d", best);
     return best;
 }

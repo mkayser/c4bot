@@ -32,6 +32,7 @@ import json
 class GameRunnerCfg:
     play_every: int
     pinned_player: str
+    pinned_player_plays_first: Optional[bool]
     opponent_pool: List[str]
     dump_games_every: Optional[int]
     dump_games_location: Optional[str]
@@ -59,6 +60,14 @@ class NegamaxBBAgentCfg:
     h: int
     w: int
     search_depth: int
+
+@dataclass 
+class RandomizedNegamaxBBAgentCfg:
+    h: int
+    w: int
+    search_depth: int
+    rng_seed: int
+    prob_of_random_move: float
 
 class QFunctionType(str, Enum):
     ConvNetQFunction="ConvNetQFunction"
@@ -96,7 +105,7 @@ class QAgentCfg:
     qfunction: QFunctionCfg
     action_picker: ActionPickerCfg
 
-PlayerCfg = Union[RandomAgentCfg, NegamaxAgentCfg, NegamaxBBAgentCfg, QAgentCfg, AlwaysPlayFixedColumnAgentCfg]
+PlayerCfg = Union[RandomAgentCfg, NegamaxAgentCfg, NegamaxBBAgentCfg, RandomizedNegamaxBBAgentCfg, QAgentCfg, AlwaysPlayFixedColumnAgentCfg]
 
 @dataclass
 class GamePlayLoopCfg:
@@ -147,6 +156,7 @@ def normalize_player_configs(players_dc: DictConfig) -> DictConfig:
         "AlwaysPlayFixedColumnAgent": AlwaysPlayFixedColumnAgentCfg,
         "NegamaxAgent": NegamaxAgentCfg,
         "NegamaxBBAgent": NegamaxBBAgentCfg,
+        "RandomizedNegamaxBBAgent": RandomizedNegamaxBBAgentCfg,
         "QAgent": QAgentCfg,
     }
     out = {}
@@ -191,6 +201,8 @@ def load_player(c: PlayerCfg, writer: utils.SummaryWriterLike):
         return agents.NegamaxAgent(c.h, c.w, c.search_depth)
     if isinstance(c, NegamaxBBAgentCfg): 
         return bbagents.NegamaxBBAgent(c.h, c.w, c.search_depth)
+    if isinstance(c, RandomizedNegamaxBBAgentCfg): 
+        return bbagents.RandomizedNegamaxBBAgent(c.h, c.w, c.search_depth, 4, c.rng_seed, c.prob_of_random_move)
     if isinstance(c, QAgentCfg): 
         if c.html_log_file:
             html_logger = agents.HtmlQLLogger(c.html_log_file, 
@@ -257,7 +269,8 @@ def game_play_loop(cfg: GamePlayLoopCfg,
 
         main_player = players[main_player_id]
         opponent = players[opponent_id]
-        pinned_is_first = rng.integers(0,2)
+        bool_array = np.array([False,True], dtype=np.bool)
+        pinned_is_first = rng.choice(bool_array) if (gr.cfg.pinned_player_plays_first is None) else gr.cfg.pinned_player_plays_first
 
         # Play game
         result: c4.C4GameRecord

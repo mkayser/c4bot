@@ -92,7 +92,7 @@ static bool __attribute__((unused)) is_move_legal(uint64_t mask, int col) {
 
 int main(void) {
 
-    Logger log = (Logger){ .f = stdout, .indent = 0 };
+    Logger log = (Logger){ .f = stdout, .indent = 0, .verbosity = 2 };
     Logger* logp = &log;
     //Logger* logp = NULL;
     
@@ -113,6 +113,8 @@ int main(void) {
                 printf("    My turn\n");
                 printf("    Initial board:\n");
                 print_board(me, opp);
+                printf("currplayer: %#06lx\n", me);
+                printf("curropp: %#06lx\n", opp);
                 int result = best_move(me, opp, depth, logp);   
                 printf("Best move: %d (one-based: %d) \n", result, result+1);
             }
@@ -120,8 +122,10 @@ int main(void) {
                 // Opp turn
                 printf("    Opp turn\n");
                 printf("    Initial board:\n");
-                print_board(opp, me);
-                int result = best_move(opp, me, depth, logp);   
+                print_board(me, opp);
+                printf("currplayer: %#06lx\n", me);
+                printf("curropp: %#06lx\n", opp);
+                int result = best_move(me, opp, depth, logp);   
                 printf("Best move: %d\n", result);
             }
         }

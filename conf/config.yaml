@@ -4,20 +4,40 @@ game_play_loop:
   rng_seed: 42
   game_runners:
     - play_every: 1
-      pinned_player: negamaxbb
-      opponent_pool: ["always3"]
+      pinned_player: dqn
+      pinned_player_plays_first: null
+      opponent_pool: ["rand_nm_bb_d6_t10", "rand_nm_bb_d6_t30", "rand_nm_bb_d6_t50"]
       log_every: 100
-      dump_games_every: null
-      dump_games_location: null
+      dump_games_every: 1000
+      dump_games_location: games/dqn-${now:%Y-%m-%d_%H-%M-%S}
       writer_prefix: games/dqn
       export_episodes: true
     - play_every: 10
-      pinned_player: negamaxbb
-      opponent_pool: ["always3"]
+      pinned_player: dqn_greedy
+      pinned_player_plays_first: null
+      opponent_pool: ["rand_nm_bb_d6_t10"]
       log_every: 10
       dump_games_every: 1000
-      dump_games_location: games/${now:%Y-%m-%d_%H-%M-%S}
-      writer_prefix: games/dqn_greedy
+      dump_games_location: games/dqng_t10-${now:%Y-%m-%d_%H-%M-%S}
+      writer_prefix: games/dqng_t10
+      export_episodes: false
+    - play_every: 10
+      pinned_player: dqn_greedy
+      pinned_player_plays_first: null
+      opponent_pool: ["rand_nm_bb_d6_t30"]
+      log_every: 10
+      dump_games_every: 1000
+      dump_games_location: games/dqng_t30-${now:%Y-%m-%d_%H-%M-%S}
+      writer_prefix: games/dqng_t30
+      export_episodes: false
+    - play_every: 10
+      pinned_player: dqn_greedy
+      pinned_player_plays_first: null
+      opponent_pool: ["rand_nm_bb_d6_t50"]
+      log_every: 10
+      dump_games_every: 1000
+      dump_games_location: games/dqng_t50-${now:%Y-%m-%d_%H-%M-%S}
+      writer_prefix: games/dqng_t50
       export_episodes: false
   players:
     random:
@@ -54,6 +74,34 @@ game_play_loop:
       h: 6
       w: 7
       search_depth: 4
+    rand_nm_bb_d4:
+      type: RandomizedNegamaxBBAgent
+      h: 6
+      w: 7
+      search_depth: 4
+      rng_seed: 42
+      prob_of_random_move: 0.15
+    rand_nm_bb_d6_t10:
+      type: RandomizedNegamaxBBAgent
+      h: 6
+      w: 7
+      search_depth: 6
+      rng_seed: 42
+      prob_of_random_move: 0.10
+    rand_nm_bb_d6_t30:
+      type: RandomizedNegamaxBBAgent
+      h: 6
+      w: 7
+      search_depth: 6
+      rng_seed: 42
+      prob_of_random_move: 0.30
+    rand_nm_bb_d6_t50:
+      type: RandomizedNegamaxBBAgent
+      h: 6
+      w: 7
+      search_depth: 6
+      rng_seed: 42
+      prob_of_random_move: 0.50
     dqn:
       type: QAgent
       update_from_queue: true
@@ -64,15 +112,15 @@ game_play_loop:
         type: ConvNetQFunction
         input_shape: [2,6,7]
         num_actions: 7
-        load_from: null
+        load_from: ./checkpoints/2025-10-21_17-25-08/model.500000.pth
         device: cpu
       action_picker: 
         type: EpsilonGreedyPicker
         epsilon: 
           type: linear_schedule
           start: 1.0
-          end: 0.1
-          steps: 150000
+          end: 0.04
+          steps: 80000
         rng_seed: 42
         writer_prefix: "agents/dqn/epsilon"
     dqn_greedy:
@@ -85,7 +133,7 @@ game_play_loop:
         type: ConvNetQFunction
         input_shape: [2,6,7]
         num_actions: 7
-        load_from: null
+        load_from: ./checkpoints/2025-10-21_17-25-08/model.500000.pth
         device: cpu
       action_picker: 
         type: EpsilonGreedyPicker
@@ -101,7 +149,7 @@ learner:
     type: ConvNetQFunction
     input_shape: [2,6,7]
     num_actions: 7
-    load_from: null
+    load_from: ./checkpoints/2025-10-21_17-25-08/model.500000.pth
     device: cuda
   step_lengths:
     1: 1.0

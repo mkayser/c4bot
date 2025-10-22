@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-typedef struct { FILE *f; int indent; } Logger;
+typedef struct { FILE *f; int indent; int verbosity; } Logger;
 
 // Returns best column [0..6], or -1 if no legal moves.
 NEGAMAX_API int best_move_no_log(uint64_t me, uint64_t opp, int depth);
