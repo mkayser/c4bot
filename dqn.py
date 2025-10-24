@@ -78,7 +78,55 @@ class ConvNetQFunction(nn.Module):
         m = type(self)(self.input_shape, self.num_actions, device=self.device_)
         m.load_state_dict(self.state_dict())
         return m
-    
+
+
+class DeepConvNetQFunction(nn.Module):
+    def __init__(self, input_shape: Tuple[int, ...], 
+                 num_actions: int, 
+                 device: torch.device | str = "cpu"):
+        super().__init__()
+        c, h, w = input_shape
+        assert c == 2 and h == 6 and w == 7, f"Unexpected input shape {input_shape}"
+        # Track init params so we can clone later
+        self.input_shape = input_shape
+        self.num_actions = num_actions
+        self.device_ = torch.device(device)
+
+        self.net = nn.Sequential(
+            nn.Conv2d(c, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64 * h * w, 512),
+            nn.ReLU(),
+            nn.Linear(512, num_actions),
+        )
+        self.to(self.device_)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, C, H, W), float32
+        return self.net(x)
+
+    @torch.no_grad()
+    def scores(self, s: np.ndarray) -> np.ndarray:
+        # Convenience inference helper
+        self.eval()
+        x = torch.from_numpy(s).float().unsqueeze(0).to(self.device_)  # (1,C,H,W)
+        q = self(x).squeeze(0).cpu().numpy()
+        return q
+
+    def clone(self) -> DeepConvNetQFunction:
+        # Proper clone: same class and constructor, then copy weights
+        m = type(self)(self.input_shape, self.num_actions, device=self.device_)
+        m.load_state_dict(self.state_dict())
+        return m
+
+
 
 class FeatureExtractor(Protocol):
     def extract(self, s: np.ndarray) -> np.ndarray: ...

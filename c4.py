@@ -173,6 +173,15 @@ def play_game(
 
         # Stop if done
         if term or trunc:
+            # Make sure all agents observe the final state
+            current_agent.observe_final_state(s)
+
+            for other_agent_id in sorted(id_to_agent.keys()):
+                if other_agent_id != agent_id:
+                    other_agent_obs = env.observe(other_agent_id)             # AEC API: get obs for any agent
+                    id_to_agent[other_agent_id].observe_final_state(other_agent_obs["observation"])
+            
+
             env.step(None)  # must pass None when an agent is done
             continue
 
@@ -195,6 +204,10 @@ def play_game(
             next_obs = env.observe(next_agent)             # AEC API: get obs for any agent
             print(c4_ansi_from_obs(next_obs))
             print(f"\nAction: {action}\n")
+
+    # Let each agent observe the final board (this is mostly for interactivity/display purposes)
+    
+
 
 
     # Game over; determine winner

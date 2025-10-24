@@ -28,6 +28,15 @@ def jprint(label, obj):
 def linear_sched(start, end, steps):
     return lambda t: start + (end - start) * min(1.0, t / steps)
 
+def spaced_half_sine_sched(minval:float, maxval: float, steps_half_sine_curve: int, steps_flat: int):
+    total_steps:int = steps_half_sine_curve + steps_flat
+    t = np.linspace(0, np.pi, steps_half_sine_curve)
+    half_sine_curve = minval + (np.sin(t) * (maxval - minval))
+    flat_part = np.full(steps_flat, minval)
+    full_schedule = np.concatenate((half_sine_curve, flat_part))
+    return lambda t: full_schedule[t % total_steps]
+
+
 class SummaryWriterLike(Protocol):
     def add_scalar(self, tag: str, value: float, step: int | None = None) -> None: ...
     def with_tag_prefix(self, tag_prefix: str) -> SummaryWriterLike: ...

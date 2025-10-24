@@ -4,7 +4,7 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated", categor
 import c4
 import agents
 import bbagents
-from dqn import ConvNetQFunction, QFunction, VanillaDQNTrainer
+from dqn import ConvNetQFunction, DeepConvNetQFunction, QFunction, VanillaDQNTrainer
 from typing import Any, Dict, List, Tuple, Union, Callable, Literal, Optional
 import numpy as np
 import torch
@@ -39,10 +39,19 @@ class GameRunnerCfg:
     log_every: int
     writer_prefix: str
     export_episodes: bool
+    export_opponent_episodes: bool
 
 @dataclass 
 class RandomAgentCfg:
     rng_seed: int
+
+@dataclass 
+class HumanAgentCfg:
+    pass
+
+@dataclass 
+class HumanPygameAgentCfg:
+    pass
 
 @dataclass 
 class AlwaysPlayFixedColumnAgentCfg:
@@ -71,17 +80,15 @@ class RandomizedNegamaxBBAgentCfg:
 
 class QFunctionType(str, Enum):
     ConvNetQFunction="ConvNetQFunction"
+    DeepConvNetQFunction="DeepConvNetQFunction"
 
 @dataclass
-class ConvNetQFunctionCfg:
+class QFunctionCfg:
     input_shape: List[int]
     num_actions: int
     device: str
     load_from: Optional[str]
-    type: QFunctionType = QFunctionType.ConvNetQFunction
-
-# Later can make this a union when there are other QFunctionCfg types
-QFunctionCfg = ConvNetQFunctionCfg
+    type: str
 
 class ActionPickerType(str, Enum):
     EpsilonGreedyPicker="EpsilonGreedyPicker"
@@ -104,8 +111,9 @@ class QAgentCfg:
     html_log_game_write_interval: Optional[int]
     qfunction: QFunctionCfg
     action_picker: ActionPickerCfg
+    debug_stream: Optional[str]
 
-PlayerCfg = Union[RandomAgentCfg, NegamaxAgentCfg, NegamaxBBAgentCfg, RandomizedNegamaxBBAgentCfg, QAgentCfg, AlwaysPlayFixedColumnAgentCfg]
+PlayerCfg = Union[HumanAgentCfg, HumanPygameAgentCfg, RandomAgentCfg, NegamaxAgentCfg, NegamaxBBAgentCfg, RandomizedNegamaxBBAgentCfg, QAgentCfg, AlwaysPlayFixedColumnAgentCfg]
 
 @dataclass
 class GamePlayLoopCfg:
@@ -153,6 +161,8 @@ class AppCfg:
 def normalize_player_configs(players_dc: DictConfig) -> DictConfig:
     schema = {
         "RandomAgent": RandomAgentCfg,
+        "HumanPygameAgent": HumanPygameAgentCfg,
+        "HumanAgent": HumanAgentCfg,
         "AlwaysPlayFixedColumnAgent": AlwaysPlayFixedColumnAgentCfg,
         "NegamaxAgent": NegamaxAgentCfg,
         "NegamaxBBAgent": NegamaxBBAgentCfg,
@@ -171,8 +181,14 @@ def normalize_player_configs(players_dc: DictConfig) -> DictConfig:
     return OmegaConf.create(out)
 
 def load_qfunction(c: QFunctionCfg):
-    if isinstance(c, ConvNetQFunctionCfg): 
+    if c.type == QFunctionType.ConvNetQFunction: 
         qfunction = ConvNetQFunction(c.input_shape, c.num_actions, c.device)
+        if c.load_from is not None:
+            state_dict = utils.load_model_state_dict(c.load_from, c.device)
+            qfunction.load_state_dict(state_dict)
+        return qfunction
+    if c.type == QFunctionType.DeepConvNetQFunction:
+        qfunction = DeepConvNetQFunction(c.input_shape, c.num_actions, c.device)
         if c.load_from is not None:
             state_dict = utils.load_model_state_dict(c.load_from, c.device)
             qfunction.load_state_dict(state_dict)
@@ -182,6 +198,8 @@ def load_qfunction(c: QFunctionCfg):
 def load_epsilon_schedule(d: Dict[str, Any]):
     if d["type"] == "linear_schedule":
         return utils.linear_sched(float(d["start"]), float(d["end"]), int(d["steps"]))
+    elif d["type"] == "spaced_half_sine_schedule":
+        return utils.spaced_half_sine_sched(float(d["min_val"]), float(d["max_val"]), int(d["n_steps_curve"]), int(d["n_steps_flat"]))
     elif d["type"] == "fixed":
         return float(d["value"])
     raise TypeError(f"Unsupported epsilon schedule type: {d["type"]}")
@@ -195,6 +213,10 @@ def load_action_picker(c: ActionPickerCfg, writer: utils.SummaryWriterLike):
 def load_player(c: PlayerCfg, writer: utils.SummaryWriterLike):
     if isinstance(c, RandomAgentCfg): 
         return agents.RandomAgent(c.rng_seed)
+    if isinstance(c, HumanAgentCfg): 
+        return agents.HumanAgent()
+    if isinstance(c, HumanPygameAgentCfg): 
+        return agents.HumanPygameAgent()
     if isinstance(c, AlwaysPlayFixedColumnAgentCfg): 
         return agents.AlwaysPlayFixedColumnAgent(c.column)
     if isinstance(c, NegamaxAgentCfg): 
@@ -211,7 +233,11 @@ def load_player(c: PlayerCfg, writer: utils.SummaryWriterLike):
             html_logger.__enter__()
         else:
             html_logger = None
-        return agents.QAgent(load_qfunction(c.qfunction), load_action_picker(c.action_picker, writer), html_logger)
+        debug_stream = None
+        if c.debug_stream is not None:
+            assert c.debug_stream in ["stdout", "stderr"]
+            debug_stream = sys.stdout if c.debug_stream=="stdout" else sys.stderr
+        return agents.QAgent(load_qfunction(c.qfunction), load_action_picker(c.action_picker, writer), html_logger, debug_stream)
     raise NotImplementedError(f"{c} configures an agent that is not implemented")
     
 def load_game_runner(c: GameRunnerCfg):
@@ -275,19 +301,20 @@ def game_play_loop(cfg: GamePlayLoopCfg,
         # Play game
         result: c4.C4GameRecord
         episode: List[c4.Transition]
+        opponent_episode: List[c4.Transition]
         score: float
         game_length: int
         game_record: Tuple[str, str, int, List[int]]
 
         if pinned_is_first:
-            result, episode, _ = c4.play_game(env, main_player, opponent)
+            result, episode, opponent_episode = c4.play_game(env, main_player, opponent)
             score = 1.0 if result.winner == c4.C4GameRoles.P0 else 0.0
             #reward_sum = 0.5 * (1.0 + sum(item.r for item in episode))
             #assert score == reward_sum, f"Mismatched score: {score} expected but sum is {reward_sum} "
             game_length = float(result.game_length())
             game_record = [main_player_id, opponent_id, game_length, result.moves]
         else:
-            result, _, episode = c4.play_game(env, opponent, main_player)
+            result, opponent_episode, episode = c4.play_game(env, opponent, main_player)
             score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
             #reward_sum = 0.5 * (1.0 + sum(item.r for item in episode))
             #assert score == reward_sum, f"Mismatched score: {score} expected but sum is {reward_sum} "
@@ -298,6 +325,13 @@ def game_play_loop(cfg: GamePlayLoopCfg,
         if gr.cfg.export_episodes:
             try:
                 episodes_q.put_nowait(episode)
+            except queue.Full:
+                print("Episodes queue full")
+
+        # Export episode
+        if gr.cfg.export_opponent_episodes:
+            try:
+                episodes_q.put_nowait(opponent_episode)
             except queue.Full:
                 print("Episodes queue full")
 

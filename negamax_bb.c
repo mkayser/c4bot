@@ -82,6 +82,18 @@ static inline int count_k(uint64_t bb, int d, int k) {
 
 static const int ORDER[7] = {3,4,2,5,1,6,0};  // center-first
 
+
+// The purpose of this function is e.g. to make immediate wins slightly (tiebreaker) more desirable
+// than later wins. Similarly, make immediate losses slightly worse than later losses.
+// This won't tend to affect whether the agent wins or loses, but leads to a more "naturalistic" play
+int time_based_score(int raw_score, int timestep) {
+    if(raw_score > 0)
+        return raw_score - timestep;
+    if(raw_score < 0)
+        return raw_score + timestep;
+    return raw_score;
+}
+
 int _best_move(uint64_t me, uint64_t opp, int depth, Logger *log) {
     uint64_t mask = board_mask(me, opp);
     int moves[WIDTH], n = generate_moves(mask, moves);
@@ -190,14 +202,14 @@ static int negamax(uint64_t me, uint64_t opp, int depth, int alpha, int beta, Lo
         if(log && log->verbosity > 1) log->indent -= 3;
         if(log && log->verbosity > 1) nb_log(log, "}");
 
-        return -W_WIN;
+        return time_based_score(-W_WIN, -depth);
     }
     if (depth == 0)   {
         int score = evaluate(me, opp);
         if(log && log->verbosity > 1) nb_log(log, "evaluate()=%d", score);
         if(log && log->verbosity > 1) log->indent -= 3;
         if(log && log->verbosity > 1) nb_log(log, "}");
-        return score;
+        return time_based_score(score, -depth);
     }
 
     uint64_t mask = board_mask(me, opp);
@@ -206,7 +218,7 @@ static int negamax(uint64_t me, uint64_t opp, int depth, int alpha, int beta, Lo
         if(log && log->verbosity > 1) nb_log(log, "[draw]");
         if(log && log->verbosity > 1) log->indent -= 3;
         if(log && log->verbosity > 1) nb_log(log, "}");
-        return 0;  // draw
+        return time_based_score(0, -depth);
     }
 
     int best = -INT_MAX/2;
@@ -225,7 +237,7 @@ static int negamax(uint64_t me, uint64_t opp, int depth, int alpha, int beta, Lo
             if(log && log->verbosity > 1) nb_log(log, "[I win]");
             if(log && log->verbosity > 1) log->indent -= 3;
             if(log && log->verbosity > 1) nb_log(log, "}");
-            return W_WIN;
+            return time_based_score(W_WIN, -(depth-1));
         }
 
         int score = -negamax(opp, me2, depth - 1, -beta, -alpha, log);

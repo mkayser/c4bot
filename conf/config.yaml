@@ -4,45 +4,21 @@ game_play_loop:
   rng_seed: 42
   game_runners:
     - play_every: 1
-      pinned_player: dqn
+      pinned_player: dqn_greedy
       pinned_player_plays_first: null
-      opponent_pool: ["rand_nm_bb_d6_t10", "rand_nm_bb_d6_t30", "rand_nm_bb_d6_t50"]
-      log_every: 100
-      dump_games_every: 1000
+      opponent_pool: ["human"]
+      log_every: 1
+      dump_games_every: 1
       dump_games_location: games/dqn-${now:%Y-%m-%d_%H-%M-%S}
       writer_prefix: games/dqn
-      export_episodes: true
-    - play_every: 10
-      pinned_player: dqn_greedy
-      pinned_player_plays_first: null
-      opponent_pool: ["rand_nm_bb_d6_t10"]
-      log_every: 10
-      dump_games_every: 1000
-      dump_games_location: games/dqng_t10-${now:%Y-%m-%d_%H-%M-%S}
-      writer_prefix: games/dqng_t10
       export_episodes: false
-    - play_every: 10
-      pinned_player: dqn_greedy
-      pinned_player_plays_first: null
-      opponent_pool: ["rand_nm_bb_d6_t30"]
-      log_every: 10
-      dump_games_every: 1000
-      dump_games_location: games/dqng_t30-${now:%Y-%m-%d_%H-%M-%S}
-      writer_prefix: games/dqng_t30
-      export_episodes: false
-    - play_every: 10
-      pinned_player: dqn_greedy
-      pinned_player_plays_first: null
-      opponent_pool: ["rand_nm_bb_d6_t50"]
-      log_every: 10
-      dump_games_every: 1000
-      dump_games_location: games/dqng_t50-${now:%Y-%m-%d_%H-%M-%S}
-      writer_prefix: games/dqng_t50
-      export_episodes: false
+      export_opponent_episodes: false
   players:
     random:
       type: RandomAgent
       rng_seed: 42
+    human:
+      type: HumanPygameAgent
     always0:
       type: AlwaysPlayFixedColumnAgent
       column: 0
@@ -108,19 +84,20 @@ game_play_loop:
       html_log_file: null
       html_log_max_games: null
       html_log_game_write_interval: null
+      debug_stream: null
       qfunction:
-        type: ConvNetQFunction
+        type: DeepConvNetQFunction
         input_shape: [2,6,7]
         num_actions: 7
-        load_from: ./checkpoints/2025-10-21_17-25-08/model.500000.pth
+        load_from: ./checkpoints/2025-10-22_12-20-59/model.138000.pth
         device: cpu
       action_picker: 
         type: EpsilonGreedyPicker
         epsilon: 
           type: linear_schedule
           start: 1.0
-          end: 0.04
-          steps: 80000
+          end: 0.05
+          steps: 50000
         rng_seed: 42
         writer_prefix: "agents/dqn/epsilon"
     dqn_greedy:
@@ -129,11 +106,12 @@ game_play_loop:
       html_log_file: html_game_log.greedy.html
       html_log_max_games: 1000
       html_log_game_write_interval: 10
+      debug_stream: stderr
       qfunction:
-        type: ConvNetQFunction
+        type: DeepConvNetQFunction
         input_shape: [2,6,7]
         num_actions: 7
-        load_from: ./checkpoints/2025-10-21_17-25-08/model.500000.pth
+        load_from: ./checkpoints/2025-10-22_12-20-59/model.138000.pth
         device: cpu
       action_picker: 
         type: EpsilonGreedyPicker
@@ -146,10 +124,10 @@ learner:
   start_tick: 0
   max_ticks: 500000
   qfunction:
-    type: ConvNetQFunction
+    type: DeepConvNetQFunction
     input_shape: [2,6,7]
     num_actions: 7
-    load_from: ./checkpoints/2025-10-21_17-25-08/model.500000.pth
+    load_from: ./checkpoints/2025-10-22_12-20-59/model.138000.pth
     device: cuda
   step_lengths:
     1: 1.0
@@ -159,7 +137,7 @@ learner:
   max_idle_training_steps: 100
   batch_size: 256
   learning_rate: 1e-3
-  train_every: 6
+  train_every: 8
   save_every: 1000
   save_location: checkpoints/${now:%Y-%m-%d_%H-%M-%S}
   target_update_every: 1000

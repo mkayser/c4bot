@@ -1,14 +1,17 @@
 import numpy as np
 from abc import ABC, abstractmethod
-from typing import Optional, Any, List, Dict, Protocol, Callable
+from typing import Optional, Any, List, Dict, Protocol, Callable, TextIO
 from logger import HtmlQLLogger
 import minimax
 import utils
+import time
+import sys
 
 
 class Agent(Protocol):
     def start_game(self, player_id: str) -> None: ...
     def act(self, s:np.ndarray, action_mask: np.ndarray) -> int: ...
+    def observe_final_state(self, s:np.ndarray) -> None: ...
     # No training inside the agent; pure selector.
     def end_game(self) -> None: ...
     def name(self) -> str:
@@ -28,6 +31,9 @@ class RandomAgent(Agent):
         legal_moves = np.flatnonzero(action_mask)
         chosen_move = self.rng.choice(legal_moves)
         return int(chosen_move)
+    
+    def observe_final_state(self, s:np.ndarray) -> None:
+        pass
     
     def end_game(self) -> None:
         pass
@@ -50,6 +56,9 @@ class AlwaysPlayFixedColumnAgent(Agent):
             legal_moves = np.flatnonzero(action_mask)
             assert legal_moves.size > 0
             return int(legal_moves[0])
+    
+    def observe_final_state(self, s:np.ndarray) -> None:
+        pass
     
     def end_game(self) -> None:
         pass
@@ -95,6 +104,9 @@ class RandomC3AgentWithForcedWins(Agent):
         legal_moves = np.flatnonzero(action_mask)
         chosen_move = self.rng.choice(legal_moves)
         return int(chosen_move)
+    
+    def observe_final_state(self, s:np.ndarray) -> None:
+        pass
     
     def end_game(self) -> None:
         pass
@@ -152,6 +164,10 @@ class NegamaxAgent(Agent):
         c4env = minimax.C4Env(self.h, self.w, self.connect_goal, board_state)
         return minimax.negamax_best_action(c4env, self.search_depth, self.board_evaluator)
 
+    def observe_final_state(self, s:np.ndarray) -> None:
+        pass
+    
+
 
 class HumanAgent(Agent):
     def __init__(self):
@@ -188,20 +204,25 @@ class HumanAgent(Agent):
         action = self._prompt_action(w)
         assert(action_mask[action])
         return action
-        
+
+    def observe_final_state(self, s:np.ndarray) -> None:
+        pass
+
 
 
 class QAgent(Agent):
     def __init__(self, 
                  qfunction: Any, 
                  action_picker: ActionPicker,
-                 logger: Optional[HtmlQLLogger] = None
+                 logger: Optional[HtmlQLLogger] = None,
+                 debug_stream: Optional[TextIO] = None
                  ):
         self.qfunction = qfunction
         self.action_picker = action_picker
         self.global_step = 0
         self.game_step = 0
         self.logger = logger
+        self.debug_stream = debug_stream
 
     def start_game(self, player_id: str) -> None:
         if self.logger:
@@ -215,8 +236,142 @@ class QAgent(Agent):
         chosen_move = self.action_picker(scores, mask=action_mask, step=self.global_step)
         if self.logger:
             self.logger.add_row(self.game_step, scores, action_mask, obs, chosen_move)
+        if self.debug_stream:
+            print(f"--------\nObs=\n{(obs[0]-obs[1]).astype(np.int8)}\nMask={action_mask}\n", file=self.debug_stream)
+            with np.printoptions(precision=3, floatmode='fixed', linewidth=np.inf):
+                print(f"QScores={scores}\n", file=self.debug_stream)
+            print(f"Chosen={chosen_move}\n", file=self.debug_stream)
         return int(chosen_move)
+    
+    def observe_final_state(self, s:np.ndarray) -> None:
+        pass
     
     def end_game(self) -> None:
         if self.logger:
             self.logger.end_game()
+
+
+import os
+import pygame
+import numpy as np
+
+class HumanPygameAgent(Agent):
+    def __init__(self, cell=80, margin=12):
+        self.cell = cell
+        self.margin = margin
+        self.screen = None
+        self.clock = None
+        self.player_id = None
+        self.cols = None
+        self.rows = None
+        self.bg = (20, 24, 35)
+        self.grid = (40, 46, 60)
+        self.p1 = (255, 200, 0)   # o
+        self.p2 = (255, 70, 70)   # x
+        self.ghost = (180, 180, 180)
+
+    def start_game(self, player_id):
+        self.player_id = player_id
+        # (re)initialized lazily on first .act() when we know board size
+
+    def end_game(self):
+        if self.screen is not None:
+            pygame.display.quit()
+            pygame.quit()
+        self.screen = None
+        self.clock = None
+        self.cols = None
+        self.rows = None
+
+    # ------------- minimal UI helpers -------------
+    def _ensure_window(self, h, w):
+        if self.screen is not None:
+            return
+        # If running headless, caller must set SDL_VIDEODRIVER appropriately.
+        pygame.init()
+        self.clock = pygame.time.Clock()
+        width_px  = w * self.cell + 2 * self.margin
+        height_px = (h + 1) * self.cell + 2 * self.margin  # +1 row for hover
+        self.screen = pygame.display.set_mode((width_px, height_px))
+        pygame.display.set_caption("Connect-4 (Human)")
+
+    def _draw(self, obs, hover_col=None, mask=None):
+        ch, h, w = obs.shape
+        self.screen.fill(self.bg)
+
+        # board rect
+        board_top = self.margin + self.cell  # leave one row on top for hover
+        pygame.draw.rect(
+            self.screen, self.grid,
+            pygame.Rect(self.margin, board_top, w*self.cell, h*self.cell),
+            border_radius=12
+        )
+
+        # cells
+        for r in range(h):
+            for c in range(w):
+                cx = self.margin + c*self.cell + self.cell//2
+                cy = board_top + r*self.cell + self.cell//2
+                # empty hole
+                color = (230, 235, 245)
+                # piece?
+                if obs[0, r, c] == 1:
+                    color = self.p1
+                elif obs[1, r, c] == 1:
+                    color = self.p2
+                pygame.draw.circle(self.screen, color, (cx, cy), int(self.cell*0.38))
+
+        # hover indicator (top row)
+        if hover_col is not None:
+            cx = self.margin + hover_col*self.cell + self.cell//2
+            cy = self.margin + self.cell//2
+            valid = True if (mask is None or (0 <= hover_col < len(mask) and mask[hover_col])) else False
+            pygame.draw.circle(self.screen, self.ghost if valid else (120,120,120), (cx, cy), int(self.cell*0.35), 3)
+
+        pygame.display.flip()
+
+    def _col_from_mouse(self, x):
+        x_rel = x - self.margin
+        if x_rel < 0:
+            return None
+        col = x_rel // self.cell
+        return int(col)
+    
+    def _display_and_get_action(self, obs: np.ndarray, action_mask: Optional[np.ndarray], wait_for_legal_action: bool) -> int:
+        """
+        Blocking: opens (or reuses) a tiny pygame window, shows board,
+        and returns a column index chosen by the user (respecting action_mask).
+        """
+        ch, h, w = obs.shape
+        self.cols, self.rows = w, h
+        self._ensure_window(h, w)
+
+        hover_col = None
+        while True:
+            # event pump
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    # let caller handle this however they prefer
+                    raise SystemExit("HumanPygameAgent window closed")
+                elif event.type == pygame.MOUSEMOTION:
+                    col = self._col_from_mouse(event.pos[0])
+                    hover_col = col if (col is not None and 0 <= col < w) else None
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if wait_for_legal_action:
+                        col = self._col_from_mouse(event.pos[0])
+                        if col is not None and 0 <= col < w and action_mask[col]:
+                            self._draw(obs, hover_col=None, mask=action_mask)  # quick redraw
+                            return col  # ✔ chosen legal action
+                    else:
+                        return -1
+
+            # draw (with hover)
+            self._draw(obs, hover_col=hover_col, mask=action_mask)
+            self.clock.tick(60)
+
+    # ------------- main API -------------
+    def act(self, obs: np.ndarray, action_mask: np.ndarray):
+        return self._display_and_get_action(obs, action_mask, wait_for_legal_action=True)
+
+    def observe_final_state(self, s:np.ndarray) -> None:
+        self._display_and_get_action(s, action_mask=None, wait_for_legal_action=False)
