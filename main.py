@@ -4,7 +4,7 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated", categor
 import c4
 import agents
 import bbagents
-from dqn import ConvNetQFunction, DeepConvNetQFunction, QFunction, VanillaDQNTrainer
+from dqn import ResConvNetQFunction, ConvNetQFunction, DeepConvNetQFunction, QFunction, VanillaDQNTrainer
 from typing import Any, Dict, List, Tuple, Union, Callable, Literal, Optional
 import numpy as np
 import torch
@@ -79,6 +79,7 @@ class RandomizedNegamaxBBAgentCfg:
     prob_of_random_move: float
 
 class QFunctionType(str, Enum):
+    ResConvNetQFunction="ResConvNetQFunction"
     ConvNetQFunction="ConvNetQFunction"
     DeepConvNetQFunction="DeepConvNetQFunction"
 
@@ -181,6 +182,12 @@ def normalize_player_configs(players_dc: DictConfig) -> DictConfig:
     return OmegaConf.create(out)
 
 def load_qfunction(c: QFunctionCfg):
+    if c.type == QFunctionType.ResConvNetQFunction: 
+        qfunction = ResConvNetQFunction(c.input_shape, c.num_actions, c.device)
+        if c.load_from is not None:
+            state_dict = utils.load_model_state_dict(c.load_from, c.device)
+            qfunction.load_state_dict(state_dict)
+        return qfunction
     if c.type == QFunctionType.ConvNetQFunction: 
         qfunction = ConvNetQFunction(c.input_shape, c.num_actions, c.device)
         if c.load_from is not None:

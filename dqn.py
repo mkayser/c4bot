@@ -35,7 +35,101 @@ class QFunction(Protocol):
     def clone(self) -> 'QFunction': ...
 
 
-#class ToyQFunction:
+# Sigmoid-shaped nonlinearity with specifiable min and max values
+class SigmoidRange(nn.Module):
+    def __init__(self, vmin, vmax, init_t=1.0, init_c=0.0):
+        super().__init__()
+        self.vmin = torch.as_tensor(vmin)
+        self.vmax = torch.as_tensor(vmax)
+        self.log_t = nn.Parameter(torch.log(torch.tensor(init_t)))
+        self.c = nn.Parameter(torch.tensor(init_c))
+
+    def forward(self, x):
+        t = torch.exp(self.log_t)                 # t > 0
+        u = torch.sigmoid((x - self.c) / t)       # (0,1)
+        return self.vmin + (self.vmax - self.vmin) * u
+
+# Res Conv2d block
+class Res(nn.Module):
+    def __init__(self, c_in, c_out, stride=1):
+        super().__init__()
+        self.f = nn.Sequential(
+            nn.Conv2d(c_in, c_out, 3, stride, 1, bias=False),
+            nn.BatchNorm2d(c_out), 
+            nn.ReLU(inplace=True),
+            nn.Conv2d(c_out, c_out, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(c_out),
+        )
+        self.skip = nn.Identity() if (c_in==c_out and stride==1) else nn.Conv2d(c_in, c_out, 1, stride, bias=False)
+    def forward(self,x): return F.relu(self.f(x) + self.skip(x))
+
+
+class ResConvNetQFunction(nn.Module):
+    def __init__(self, input_shape: Tuple[int, ...], 
+                 num_actions: int, 
+                 device: torch.device | str = "cpu"):
+        super().__init__()
+        c, h, w = input_shape
+        assert c == 2 and h == 6 and w == 7, f"Unexpected input shape {input_shape}"
+        # Track init params so we can clone later
+        self.input_shape = input_shape
+        self.num_actions = num_actions
+        self.device_ = torch.device(device)
+
+        self.net = nn.Sequential(
+            Res(c, 32),
+            Res(32, 32),
+            Res(32, 64),
+            nn.AdaptiveAvgPool2d((1, None))
+        )
+
+        # In this head, all column data is combined
+        self.head1 = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(64 * w, 512),
+            nn.ReLU(),
+            nn.Linear(512, num_actions),
+        )
+
+        # In this head, each column score is propagated through a 1x1 conv separately
+        self.head2 = nn.Sequential(
+            nn.Conv2d(64, 1, kernel_size=1, bias=True),  # per-(1,W) position linear over 64 ch
+            nn.ReLU(),
+            nn.Conv2d(1, 1, kernel_size=1, bias=True),  # per-(1,W) position linear over 1 ch
+            nn.Flatten(),                     # (N,1,1,W) -> (N,W)
+        )
+
+        self.nonlinearity = SigmoidRange(-2.0, 2.0)
+
+        self.to(self.device_)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, C, H, W), float32
+        y = self.net(x) # (B, 64, 1, W)
+        #print(f"y.shape = {y.shape}")
+        z1 = self.head1(y) # (B, W)
+        #print(f"z1.shape = {z1.shape}")
+        z2 = self.head2(y) # (B, W)
+        #print(f"z2.shape = {z2.shape}")
+        return self.nonlinearity(z1 + z2)
+
+
+    @torch.no_grad()
+    def scores(self, s: np.ndarray) -> np.ndarray:
+        # Convenience inference helper
+        self.eval()
+        x = torch.from_numpy(s).float().unsqueeze(0).to(self.device_)  # (1,C,H,W)
+        q = self(x).squeeze(0).cpu().numpy()
+        return q
+
+    def clone(self) -> ConvNetQFunction:
+        # Proper clone: same class and constructor, then copy weights
+        m = type(self)(self.input_shape, self.num_actions, device=self.device_)
+        m.load_state_dict(self.state_dict())
+        return m
+
+
+
 
 class ConvNetQFunction(nn.Module):
     def __init__(self, input_shape: Tuple[int, ...], 
