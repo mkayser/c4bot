@@ -1,33 +1,64 @@
+globals:
+  runid: ???
+  qfunction: &qfunction
+    type: DeepConvNetQFunction
+    input_shape: [2,6,7]
+    num_actions: 7
+    load_from: null
+    device: cpu
+  qagent: &qagent
+    type: QAgent
+    update_from_queue: true
+    html_log_file: null
+    html_log_max_games: null
+    html_log_game_write_interval: null
+    debug_stream: null
+    qfunction: { <<: *qfunction }
+    action_picker: 
+      type: EpsilonGreedyPicker
+      epsilon: { type: linear_schedule, start: 1.0, end: 0.05, steps: 20000 }
+      rng_seed: 42
+      writer_prefix: "agents/dqn/epsilon"
+  game_runner_training: &game_runner_training
+    play_every: 1
+    pinned_player: dqn
+    pinned_player_plays_first: null
+    opponent_pool: 
+      - d2r00
+      - d2r10
+      - d2r30
+      - d2r50
+#      - d6r00
+#      - d6r10
+#      - d6r30
+#      - d6r50
+    log_every: 100
+    dump_games_every: 1000
+    dump_games_location: games/dqn-${globals.runid}
+    writer_prefix: games/dqn_train
+    export_episodes: true
+    export_opponent_episodes: false
+  game_runner_validation: &game_runner_validation
+    <<: *game_runner_training
+    play_every: 10
+    log_every: 10
+    dump_games_every: 100
+    export_episodes: false
+    export_opponent_episodes: false
 game_play_loop:
   start_tick: 0
-  max_ticks: 300000
+  max_ticks: 1000000
   rng_seed: 42
   game_runners:
-    - &game_runner_base
-      play_every: 1
-      pinned_player: dqn
-      pinned_player_plays_first: null
-      opponent_pool: 
-        - d2r00
-        - d2r10
-        - d2r30
-        - d2r50
-        - d6r00
-        - d6r10
-        - d6r30
-        - d6r50
-      log_every: 100
-      dump_games_every: 1000
-      dump_games_location: games/dqn-${now:%Y-%m-%d_%H-%M-%S}
-      writer_prefix: games/dqn_train
-      export_episodes: true
-      export_opponent_episodes: false
-    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d2r10"], dump_games_location: games/dqn_d2r10, writer_prefix: games/dqn_d2r10, export_episodes: False}
-    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d2r30"], dump_games_location: games/dqn_d2r30, writer_prefix: games/dqn_d2r30, export_episodes: False}
-    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d2r50"], dump_games_location: games/dqn_d2r50, writer_prefix: games/dqn_d2r50, export_episodes: False}
-    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d6r10"], dump_games_location: games/dqn_d6r10, writer_prefix: games/dqn_d6r10, export_episodes: False}
-    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d6r30"], dump_games_location: games/dqn_d6r30, writer_prefix: games/dqn_d6r30, export_episodes: False}
-    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d6r50"], dump_games_location: games/dqn_d6r50, writer_prefix: games/dqn_d6r50, export_episodes: False}
+    - {<<: *game_runner_training}
+    - {<<: *game_runner_validation, opponent_pool: ["d2r00"], dump_games_location: games/dqn_d2r00, writer_prefix: games/dqn_d2r00}
+    - {<<: *game_runner_validation, opponent_pool: ["d2r10"], dump_games_location: games/dqn_d2r10, writer_prefix: games/dqn_d2r10}
+    - {<<: *game_runner_validation, opponent_pool: ["d2r30"], dump_games_location: games/dqn_d2r30, writer_prefix: games/dqn_d2r30}
+    - {<<: *game_runner_validation, opponent_pool: ["d2r50"], dump_games_location: games/dqn_d2r50, writer_prefix: games/dqn_d2r50}
+#    - {<<: *game_runner_validation, opponent_pool: ["d6r00"], dump_games_location: games/dqn_d6r00, writer_prefix: games/dqn_d6r00}
+#    - {<<: *game_runner_validation, opponent_pool: ["d6r10"], dump_games_location: games/dqn_d6r10, writer_prefix: games/dqn_d6r10}
+#    - {<<: *game_runner_validation, opponent_pool: ["d6r30"], dump_games_location: games/dqn_d6r30, writer_prefix: games/dqn_d6r30}
+#    - {<<: *game_runner_validation, opponent_pool: ["d6r50"], dump_games_location: games/dqn_d6r50, writer_prefix: games/dqn_d6r50}
   players:
     random: {type: RandomAgent, rng_seed: 42}
     always0: {type: AlwaysPlayFixedColumnAgent, column: 0}
@@ -45,59 +76,19 @@ game_play_loop:
     d6r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.10}
     d6r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.30}
     d6r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.50}
-    dqn:
-      type: QAgent
-      update_from_queue: true
-      html_log_file: null
-      html_log_max_games: null
-      html_log_game_write_interval: null
-      debug_stream: null
-      qfunction:
-        type: DeepConvNetQFunction
-        input_shape: [2,6,7]
-        num_actions: 7
-        load_from: ./checkpoints/2025-10-29_15-16-59/model.500000.pth
-        device: cpu
-      action_picker: 
-        type: EpsilonGreedyPicker
-        epsilon: 
-          type: linear_schedule
-          start: 0.05
-          end: 0.05
-          steps: 20000
-        rng_seed: 42
-        writer_prefix: "agents/dqn/epsilon"
+    dqn: { <<: *qagent }
     dqn_greedy:
-      type: QAgent
-      update_from_queue: true
-      html_log_file: html_game_log.greedy.html
-      html_log_max_games: 1000
-      html_log_game_write_interval: 10
-      debug_stream: null
-      qfunction:
-        type: DeepConvNetQFunction
-        input_shape: [2,6,7]
-        num_actions: 7
-        load_from: ./checkpoints/2025-10-29_15-16-59/model.500000.pth
-        device: cpu
+      <<: *qagent
       action_picker: 
         type: EpsilonGreedyPicker
-        epsilon: 
-          type: fixed
-          value: 0.0
+        epsilon: { type: fixed, value: 0.0 }
         rng_seed: 42
         writer_prefix: agents/dqn/epsilon
 learner:
   start_tick: 0
-  max_ticks: 500000
-  qfunction:
-    type: DeepConvNetQFunction
-    input_shape: [2,6,7]
-    num_actions: 7
-    load_from: ./checkpoints/2025-10-29_15-16-59/model.500000.pth
-    device: cuda
-  step_lengths:
-    1: 1.0
+  max_ticks: 1000000
+  qfunction: { <<: *qfunction, device: cuda }
+  step_lengths: { 1: 1.0 }
   replay_buffer_size: 10000
   use_prioritized_replay: True
   PER_alpha: 0.99
@@ -108,13 +99,13 @@ learner:
   max_ratio_of_train_steps_to_transitions: 1.0
   max_idle_training_steps: 100
   batch_size: 256
-  learning_rate: 1e-3
+  learning_rate: 1e-2
   train_every: 8
   save_every: 1000
-  save_location: checkpoints/${now:%Y-%m-%d_%H-%M-%S}
+  save_location: checkpoints/${globals.runid}
   target_update_every: 1000
   update_player_every: 100
   max_gradient_norm: 1.0
   gamma: 0.9
 logger: 
-  writer_prefix: null
+  writer_prefix: runs/${globals.runid}

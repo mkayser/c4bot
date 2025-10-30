@@ -158,6 +158,7 @@ class LoggerCfg:
 
 @dataclass
 class AppCfg:
+    globals: Dict[str, Any]
     game_play_loop: GamePlayLoopCfg
     learner: LearnerCfg
     logger: LoggerCfg
@@ -456,7 +457,7 @@ def logger(cfg: LoggerCfg, logs_q: Queue, stop_event: EventType):
     install_child_sigint_ignorer()
 
     # Initialize
-    writer = SummaryWriter() 
+    writer = SummaryWriter(log_dir=cfg.writer_prefix) 
 
     # Main loop
     while not stop_event.is_set():
