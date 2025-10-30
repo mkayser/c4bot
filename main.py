@@ -78,6 +78,7 @@ class RandomizedNegamaxBBAgentCfg:
     search_depth: int
     rng_seed: int
     prob_of_random_move: float
+    switch_to_deterministic_after: int
 
 class QFunctionType(str, Enum):
     ResConvNetQFunction="ResConvNetQFunction"
@@ -238,7 +239,7 @@ def load_player(c: PlayerCfg, writer: utils.SummaryWriterLike):
     if isinstance(c, NegamaxBBAgentCfg): 
         return bbagents.NegamaxBBAgent(c.h, c.w, c.search_depth)
     if isinstance(c, RandomizedNegamaxBBAgentCfg): 
-        return bbagents.RandomizedNegamaxBBAgent(c.h, c.w, c.search_depth, 4, c.rng_seed, c.prob_of_random_move)
+        return bbagents.RandomizedNegamaxBBAgent(c.h, c.w, c.search_depth, 4, c.rng_seed, c.prob_of_random_move, c.switch_to_deterministic_after)
     if isinstance(c, QAgentCfg): 
         if c.html_log_file:
             html_logger = agents.HtmlQLLogger(c.html_log_file, 

@@ -84,14 +84,23 @@ class NegamaxBBAgent(Agent):
 
 
 class RandomizedNegamaxBBAgent(Agent):
-    def __init__(self, h:int, w:int, search_depth=4, connect_goal:int=4, seed:int=42, prob_of_random_move:float = 0.5):
+    def __init__(self, h:int, 
+                 w:int, 
+                 search_depth=4, 
+                 connect_goal:int=4, 
+                 seed:int=42, 
+                 prob_of_random_move:float = 0.5,
+                 switch_to_deterministic_after = None):
         assert h==6 and w==7, "RandomizedNegamaxBBAgent assumes 6x7"
         assert connect_goal==4, "RandomizedNegamaxBBAgent assumes connect-4"
         self.h, self.w, self.search_depth, self.prob_of_random_move = h, w, search_depth, prob_of_random_move
         self.rng = np.random.default_rng(seed)
+        self.switch_to_deterministic_after = switch_to_deterministic_after
         assert prob_of_random_move >= 0.0 and prob_of_random_move <= 1.0
 
-    def start_game(self, player_id): pass
+    def start_game(self, player_id): 
+        self.move_count = 0
+
     def end_game(self): pass
 
     def act_randomly(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
@@ -114,7 +123,13 @@ class RandomizedNegamaxBBAgent(Agent):
         return col
     
     def act(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
-        choose_randomly = (self.rng.random() <= self.prob_of_random_move)
+        self.move_count += 1
+
+        if (self.switch_to_deterministic_after is not None) and self.move_count <= self.switch_to_deterministic_after:
+            choose_randomly = (self.rng.random() <= self.prob_of_random_move)
+        else:
+            choose_randomly = False
+
         if choose_randomly:
             return self.act_randomly(obs, action_mask)
         else:

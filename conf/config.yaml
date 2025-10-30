@@ -1,7 +1,7 @@
 globals:
   runid: ???
   qfunction: &qfunction
-    type: DeepConvNetQFunction
+    type: ResConvNetQFunction
     input_shape: [2,6,7]
     num_actions: 7
     load_from: null
@@ -16,7 +16,7 @@ globals:
     qfunction: { <<: *qfunction }
     action_picker: 
       type: EpsilonGreedyPicker
-      epsilon: { type: linear_schedule, start: 1.0, end: 0.05, steps: 20000 }
+      epsilon: { type: linear_schedule, start: 1.0, end: 0.05, steps: 40000 }
       rng_seed: 42
       writer_prefix: "agents/dqn/epsilon"
   game_runner_training: &game_runner_training
@@ -68,14 +68,14 @@ game_play_loop:
     always4: {type: AlwaysPlayFixedColumnAgent, column: 4}
     always5: {type: AlwaysPlayFixedColumnAgent, column: 5}
     always6: {type: AlwaysPlayFixedColumnAgent, column: 6}
-    d2r00: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.00}
-    d2r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.10}
-    d2r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.30}
-    d2r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.50}
-    d6r00: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.00}
-    d6r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.10}
-    d6r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.30}
-    d6r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.50}
+    d2r00: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.00, switch_to_deterministic_after: 8}
+    d2r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.10, switch_to_deterministic_after: 8}
+    d2r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.30, switch_to_deterministic_after: 8}
+    d2r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.50, switch_to_deterministic_after: 8}
+    d6r00: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.00, switch_to_deterministic_after: 8}
+    d6r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.10, switch_to_deterministic_after: 8}
+    d6r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.30, switch_to_deterministic_after: 8}
+    d6r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.50, switch_to_deterministic_after: 8}
     dqn: { <<: *qagent }
     dqn_greedy:
       <<: *qagent
