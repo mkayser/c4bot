@@ -3,81 +3,48 @@ game_play_loop:
   max_ticks: 300000
   rng_seed: 42
   game_runners:
-    - play_every: 1
-      pinned_player: dqn_greedy
+    - &game_runner_base
+      play_every: 1
+      pinned_player: dqn
       pinned_player_plays_first: null
-      opponent_pool: ["human"]
-      log_every: 1
-      dump_games_every: 1
+      opponent_pool: 
+        - d2r00
+        - d2r10
+        - d2r30
+        - d2r50
+        - d6r00
+        - d6r10
+        - d6r30
+        - d6r50
+      log_every: 100
+      dump_games_every: 1000
       dump_games_location: games/dqn-${now:%Y-%m-%d_%H-%M-%S}
-      writer_prefix: games/dqn
-      export_episodes: false
+      writer_prefix: games/dqn_train
+      export_episodes: true
       export_opponent_episodes: false
+    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d2r10"], dump_games_location: games/dqn_d2r10, writer_prefix: games/dqn_d2r10, export_episodes: False}
+    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d2r30"], dump_games_location: games/dqn_d2r30, writer_prefix: games/dqn_d2r30, export_episodes: False}
+    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d2r50"], dump_games_location: games/dqn_d2r50, writer_prefix: games/dqn_d2r50, export_episodes: False}
+    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d6r10"], dump_games_location: games/dqn_d6r10, writer_prefix: games/dqn_d6r10, export_episodes: False}
+    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d6r30"], dump_games_location: games/dqn_d6r30, writer_prefix: games/dqn_d6r30, export_episodes: False}
+    - {<<: *game_runner_base, play_every: 10, log_every: 10, opponent_pool: ["d6r50"], dump_games_location: games/dqn_d6r50, writer_prefix: games/dqn_d6r50, export_episodes: False}
   players:
-    random:
-      type: RandomAgent
-      rng_seed: 42
-    human:
-      type: HumanPygameAgent
-    always0:
-      type: AlwaysPlayFixedColumnAgent
-      column: 0
-    always1:
-      type: AlwaysPlayFixedColumnAgent
-      column: 1
-    always2:
-      type: AlwaysPlayFixedColumnAgent
-      column: 2
-    always3:
-      type: AlwaysPlayFixedColumnAgent
-      column: 3
-    always4:
-      type: AlwaysPlayFixedColumnAgent
-      column: 4
-    always5:
-      type: AlwaysPlayFixedColumnAgent
-      column: 5
-    always6:
-      type: AlwaysPlayFixedColumnAgent
-      column: 6
-    negamax:
-      type: NegamaxAgent
-      h: 6
-      w: 7
-      search_depth: 2
-    negamaxbb:
-      type: NegamaxBBAgent
-      h: 6
-      w: 7
-      search_depth: 4
-    rand_nm_bb_d4:
-      type: RandomizedNegamaxBBAgent
-      h: 6
-      w: 7
-      search_depth: 4
-      rng_seed: 42
-      prob_of_random_move: 0.15
-    rand_nm_bb_d6_t10:
-      type: RandomizedNegamaxBBAgent
-      h: 6
-      w: 7
-      search_depth: 6
-      rng_seed: 42
-      prob_of_random_move: 0.10
-    rand_nm_bb_d6_t30:
-      type: RandomizedNegamaxBBAgent
-      h: 6
-      w: 7
-      search_depth: 6
-      rng_seed: 42
-      prob_of_random_move: 0.30
-    rand_nm_bb_d6_t50:
-      type: RandomizedNegamaxBBAgent
-      h: 6
-      w: 7
-      search_depth: 6
-      rng_seed: 42
-      prob_of_random_move: 0.50
+    random: {type: RandomAgent, rng_seed: 42}
+    always0: {type: AlwaysPlayFixedColumnAgent, column: 0}
+    always1: {type: AlwaysPlayFixedColumnAgent, column: 1}
+    always2: {type: AlwaysPlayFixedColumnAgent, column: 2}
+    always3: {type: AlwaysPlayFixedColumnAgent, column: 3}
+    always4: {type: AlwaysPlayFixedColumnAgent, column: 4}
+    always5: {type: AlwaysPlayFixedColumnAgent, column: 5}
+    always6: {type: AlwaysPlayFixedColumnAgent, column: 6}
+    d2r00: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.00}
+    d2r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.10}
+    d2r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.30}
+    d2r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.50}
+    d6r00: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.00}
+    d6r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.10}
+    d6r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.30}
+    d6r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.50}
     dqn:
       type: QAgent
       update_from_queue: true
@@ -89,15 +56,15 @@ game_play_loop:
         type: DeepConvNetQFunction
         input_shape: [2,6,7]
         num_actions: 7
-        load_from: ./checkpoints/2025-10-22_12-20-59/model.138000.pth
+        load_from: ./checkpoints/2025-10-29_15-16-59/model.500000.pth
         device: cpu
       action_picker: 
         type: EpsilonGreedyPicker
         epsilon: 
           type: linear_schedule
-          start: 1.0
+          start: 0.05
           end: 0.05
-          steps: 50000
+          steps: 20000
         rng_seed: 42
         writer_prefix: "agents/dqn/epsilon"
     dqn_greedy:
@@ -106,12 +73,12 @@ game_play_loop:
       html_log_file: html_game_log.greedy.html
       html_log_max_games: 1000
       html_log_game_write_interval: 10
-      debug_stream: stderr
+      debug_stream: null
       qfunction:
         type: DeepConvNetQFunction
         input_shape: [2,6,7]
         num_actions: 7
-        load_from: ./checkpoints/2025-10-22_12-20-59/model.138000.pth
+        load_from: ./checkpoints/2025-10-29_15-16-59/model.500000.pth
         device: cpu
       action_picker: 
         type: EpsilonGreedyPicker
@@ -127,11 +94,16 @@ learner:
     type: DeepConvNetQFunction
     input_shape: [2,6,7]
     num_actions: 7
-    load_from: ./checkpoints/2025-10-22_12-20-59/model.138000.pth
+    load_from: ./checkpoints/2025-10-29_15-16-59/model.500000.pth
     device: cuda
   step_lengths:
     1: 1.0
   replay_buffer_size: 10000
+  use_prioritized_replay: True
+  PER_alpha: 0.99
+  PER_beta_start: 0.3
+  PER_beta_end: 1.0
+  PER_beta_steps: 100000
   replay_buffer_min_to_train: 1000
   max_ratio_of_train_steps_to_transitions: 1.0
   max_idle_training_steps: 100

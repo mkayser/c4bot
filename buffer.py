@@ -18,7 +18,69 @@ from __future__ import annotations
 import math
 import numpy as np
 import torch
-from typing import Tuple, Optional, Dict, Any, Callable
+from typing import Tuple, Optional, Dict, Any, Callable, Protocol
+import c4
+
+
+
+# class Transition(NamedTuple):
+#    s: np.ndarray
+#    a: int
+#    r: float
+#    s2: np.ndarray
+#    mask: np.ndarray
+#    mask2: np.ndarray
+
+class SimpleTransitionReplayBuffer:
+    def __init__(self, 
+                 capacity : int, 
+                 obs_shape : Tuple[int, ...],
+                 num_actions : int,
+                 *,
+                 dtype_obs=np.float32,
+                 dtype_r=np.float32,
+                 dtype_mask=np.float32,
+                 dtype_a=np.int64):
+        self.capacity = capacity
+        self.s  = np.empty((capacity, *obs_shape), dtype=dtype_obs)
+        self.a  = np.empty((capacity,), dtype=dtype_a)
+        self.r  = np.empty((capacity,), dtype=dtype_r)
+        self.s2 = np.empty((capacity, *obs_shape), dtype=dtype_obs)
+        self.mask = np.empty((capacity, num_actions), dtype=dtype_mask)
+        self.mask2 = np.empty((capacity, num_actions), dtype=dtype_mask)
+        self.done = np.empty((capacity,), dtype=bool)
+        self.size = 0
+        self.next = 0
+
+    def add(self, tr: c4.Transition) -> None:
+        i = self.next
+        self.s[i]  = tr.s
+        self.a[i]  = tr.a
+        self.r[i]  = tr.r
+        self.s2[i] = tr.s2
+        self.mask[i]  = tr.mask
+        self.mask2[i] = tr.mask2
+        self.done[i] = tr.done
+        self.next = (i + 1) % self.capacity
+        if self.size < self.capacity:
+            self.size += 1
+
+    def num_entries(self) -> int:
+        return self.size
+
+    def sample(self, batch_size):
+        idxs = np.random.randint(0, self.size, size=batch_size)
+        return {
+            "idxs": idxs,
+            "s": self.s[idxs],
+            "a": self.a[idxs],
+            "r": self.r[idxs],
+            "s2": self.s2[idxs],
+            "mask": self.mask[idxs],
+            "mask2": self.mask2[idxs],
+            "done": self.done[idxs],
+        }
+
 
 
 class SumTree:
@@ -71,24 +133,33 @@ class SumTree:
         return min(leaf, self.capacity - 1)
 
 
+# Fix PERBuffer to match the TransitionReplayBuffer Protocol
+#  * dtype naming
+#  * use numpy arrays instead of torch
+#  * Anything else, naming, etc.
+# Fix Trainer usages of buffer, including adding the update-losses step if PERbuffer
+# Fix references to TransitionReplayBuffer to refer to the Protocol
+# Fix anything (e.g. trainer loop) that instantiates Trainer so it creates the buffer and passes it in
+# Fix config so that it specifies PERbuffer or simple buffer
 class PERBuffer:
     def __init__(
         self,
-        capacity: int,
-        obs_shape: Tuple[int, ...],
-        act_shape: Tuple[int, ...] = (),
-        obs_dtype=np.float32,
-        act_dtype=np.int64,
-        device: str = "cpu",
+        capacity : int, 
+        obs_shape : Tuple[int, ...],
+        num_actions : int,
+        *,
+        dtype_obs=np.float32,
+        dtype_r=np.float32,
+        dtype_mask=np.float32,
+        dtype_a=np.int64,
         alpha: float = 0.6,
         beta: float | Callable[[int], float] = 1.0,
         eps: float = 1e-5,
         normalize_weights: bool = True,
-        w_clip: Optional[float] = None,
-    ):
+        w_clip: Optional[float] = None):
+    
         assert 0 <= alpha <= 1
         self.capacity = int(capacity)
-        self.device = torch.device(device)
         self.alpha = float(alpha)
         self.beta = beta
         self.eps = float(eps)
@@ -96,41 +167,44 @@ class PERBuffer:
         self.w_clip = None if w_clip is None else float(w_clip)
 
         # Storage
-        self.obs = np.zeros((self.capacity, *obs_shape), dtype=obs_dtype)
-        self.next_obs = np.zeros((self.capacity, *obs_shape), dtype=obs_dtype)
-        self.acts = np.zeros((self.capacity, *act_shape), dtype=act_dtype)
-        self.rews = np.zeros((self.capacity,), dtype=np.float32)
-        self.dones = np.zeros((self.capacity,), dtype=np.float32)
+        self.s = np.zeros((self.capacity, *obs_shape), dtype=dtype_obs)
+        self.a = np.zeros((self.capacity,), dtype=dtype_a)
+        self.r = np.zeros((self.capacity,), dtype=dtype_r)
+        self.s2 = np.zeros((self.capacity, *obs_shape), dtype=dtype_obs)
+        self.mask = np.empty((capacity, num_actions), dtype=dtype_mask)
+        self.mask2 = np.empty((capacity, num_actions), dtype=dtype_mask)
+        self.done = np.zeros((self.capacity,), dtype=np.float32)
 
         # Priorities and tree store p_i^α
         self.tree = SumTree(self.capacity)
         self.max_priority_alpha = 1.0  # max (|δ|+ε)^α observed; start at 1 to sample fresh data
 
-        self.ptr = 0
+        self.next = 0
         self.size = 0
 
-    def __len__(self) -> int:
+    def num_entries(self) -> int:
         return self.size
 
-    def push(
-        self,
-        obs: np.ndarray,
-        act: np.ndarray | int | float,
-        rew: float,
-        next_obs: np.ndarray,
-        done: bool) -> None:
-        idx = self.ptr
-        self.obs[idx] = obs
-        self.acts[idx] = act
-        self.rews[idx] = rew
-        self.next_obs[idx] = next_obs
-        self.dones[idx] = float(done)
+    def add(self, tr: c4.Transition) -> None:
+        i = self.next
 
+        # Update the current buffer location
+        self.s[i]  = tr.s
+        self.a[i]  = tr.a
+        self.r[i]  = tr.r
+        self.s2[i] = tr.s2
+        self.mask[i]  = tr.mask
+        self.mask2[i] = tr.mask2
+        self.done[i] = tr.done
+
+        # Update the corresponding sumtree location
+        # We have not computed a priority, so set to the max priority
+        # This prioritizes novel data
         p_alpha = self.max_priority_alpha
+        self.tree.update(i, p_alpha)
 
-        self.tree.update(idx, p_alpha)
-
-        self.ptr = (self.ptr + 1) % self.capacity
+        # Increment next and size
+        self.next = (i + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
 
     def _beta(self, frame_idx: int) -> float:
@@ -143,7 +217,7 @@ class PERBuffer:
         total = self.tree.total()
         assert total > 0, "SumTree total is zero; all priorities are zero."
 
-        # Stratified sampling segments
+        # Define indices: Sample (stratified sampling) from buffer
         seg = total / batch_size
         samples = []
         for i in range(batch_size):
@@ -154,36 +228,36 @@ class PERBuffer:
             samples.append(idx)
         idxs = np.array(samples, dtype=np.int64)
 
+        # Retrieve the priority^alpha values, and normalize to make a prob dist
         p_alpha = np.array([self.tree.get(i) for i in idxs], dtype=np.float64)
         P = p_alpha / (total + 1e-12)
 
+        # Compute beta for this time step
         beta = self._beta(frame_idx)
-        # IS weights: (1 / (N * P(i)))^β
+
+        # Compute Importance Sampling Weights: weight for i is: (1 / (N * P(i)))^β
         N = self.size
         w = (N * P) ** (-beta)
-        # Normalize by max within batch to cap dynamic range at 1
+
+        # Normalize weights by max-within-batch to cap dynamic range at 1
         if self.normalize_weights:
             w /= (w.max() + 1e-12)
+
+        # Enforce minimum weight
         if self.w_clip is not None:
             w = np.minimum(w, self.w_clip)
 
-        # Gather batch
-        obs_b = torch.as_tensor(self.obs[idxs], device=self.device)
-        next_obs_b = torch.as_tensor(self.next_obs[idxs], device=self.device)
-        acts_b = torch.as_tensor(self.acts[idxs], device=self.device)
-        rews_b = torch.as_tensor(self.rews[idxs], device=self.device)
-        dones_b = torch.as_tensor(self.dones[idxs], device=self.device)
-        w_b = torch.as_tensor(w.astype(np.float32), device=self.device)
-
         return {
             "idxs": idxs,
-            "obs": obs_b,
-            "acts": acts_b,
-            "rews": rews_b,
-            "next_obs": next_obs_b,
-            "dones": dones_b,
-            "weights": w_b,
-            "P": torch.as_tensor(P.astype(np.float32), device=self.device),
+            "s": self.s[idxs],
+            "a": self.a[idxs],
+            "r": self.r[idxs],
+            "s2": self.s2[idxs],
+            "mask": self.mask[idxs],
+            "mask2": self.mask2[idxs],
+            "done": self.done[idxs],
+            "weights": w,
+            "sample_probs": P,
             "beta": beta,
         }
 

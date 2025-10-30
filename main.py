@@ -24,6 +24,7 @@ import signal
 from urllib.parse import urlparse
 import os
 import json
+import buffer
 
 
 # Hydra config classes
@@ -131,6 +132,11 @@ class LearnerCfg:
     qfunction: QFunctionCfg
     step_lengths: Dict[int,float]
     replay_buffer_size: int
+    use_prioritized_replay: bool
+    PER_alpha: float
+    PER_beta_start: float
+    PER_beta_end: float
+    PER_beta_steps: int
     replay_buffer_min_to_train: int
     max_ratio_of_train_steps_to_transitions: float
     max_idle_training_steps: int
@@ -342,7 +348,7 @@ def game_play_loop(cfg: GamePlayLoopCfg,
             except queue.Full:
                 print("Episodes queue full")
 
-        # Update stats
+        # Update scores
         gr.recent_scores.add(score)
         gr.recent_game_lengths.add(game_length)
         gr.recent_games.add(game_record)
@@ -358,9 +364,9 @@ def game_play_loop(cfg: GamePlayLoopCfg,
             avg_game_length = gr.recent_game_lengths.average_if_full()
             avg_recent_nz_tr_rw = gr.recent_nonzero_transition_rewards.average_if_full()
             writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_score", avg_score, gr.num_games_played)
-            writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_game_length", avg_game_length, gr.num_games_played)
-            writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_nz_tr_rw", avg_recent_nz_tr_rw, gr.num_games_played)
-            writer.add_scalar(f"{gr.cfg.writer_prefix}/total_reward", gr.total_reward, gr.num_games_played)
+            #writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_game_length", avg_game_length, gr.num_games_played)
+            #writer.add_scalar(f"{gr.cfg.writer_prefix}/recent_avg_nz_tr_rw", avg_recent_nz_tr_rw, gr.num_games_played)
+            #writer.add_scalar(f"{gr.cfg.writer_prefix}/total_reward", gr.total_reward, gr.num_games_played)
         
         if (gr.cfg.dump_games_every is not None) and (gr.cfg.dump_games_location is not None):
             if (gr.num_games_played % gr.cfg.dump_games_every) == 0:
@@ -497,9 +503,17 @@ def learner(cfg: LearnerCfg,
             assert result.scheme == ""
             saver = utils.LocalModelSaver(cfg.save_location)
 
+        # Create replay buffer
+        replay_buffer:buffer.SimpleTransitionReplayBuffer|buffer.PERBuffer = None
+        if cfg.use_prioritized_replay:
+            beta = utils.linear_sched(cfg.PER_beta_start, cfg.PER_beta_end, cfg.PER_beta_steps)
+            replay_buffer = buffer.PERBuffer(cfg.replay_buffer_size, (2,6,7), 7, alpha=cfg.PER_alpha, beta=beta)
+        else:
+            replay_buffer = buffer.SimpleTransitionReplayBuffer(cfg.replay_buffer_size, (2,6,7), 7)
+
         # Initialize trainer
         trainer = VanillaDQNTrainer(qfunction=qfunction, 
-                                    buffer_size=cfg.replay_buffer_size,
+                                    replay_buffer=replay_buffer,
                                     batch_size=cfg.batch_size,
                                     step_length_distribution=cfg.step_lengths,
                                     min_buffer_to_train=cfg.replay_buffer_min_to_train,

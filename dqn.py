@@ -8,6 +8,7 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 import utils
 import copy
+import buffer
 
 
 #class Observation(NamedTuple):
@@ -276,10 +277,6 @@ class LocalizedFeaturePredicates:
     @staticmethod
     def belongs_to_opp_2inarow(s: np.ndarray, row: int, col: int) -> bool:
         return LocalizedFeaturePredicates.belongs_to_my_2inarow(s[::-1,:,:], row, col)
-    
-
-        
-
 
 class FeaturizedLinearQFunction(nn.Module):
     def __init__(self, 
@@ -326,54 +323,6 @@ class FeaturizedLinearQFunction(nn.Module):
         m = type(self)(self.input_shape, self.num_actions, device=self.device_)
         m.load_state_dict(self.state_dict())
         return m
-    
-
-# class Transition(NamedTuple):
-#    s: np.ndarray
-#    a: int
-#    r: float
-#    s2: np.ndarray
-#    mask: np.ndarray
-#    mask2: np.ndarray
-
-    
-class TransitionReplayBuffer:
-    def __init__(self, 
-                 capacity : int, 
-                 obs_shape : Tuple[int, ...],
-                 num_actions : int,
-                 dtype_obs=np.float32):
-        self.capacity = capacity
-        self.s  = np.empty((capacity, *obs_shape), dtype=dtype_obs)
-        self.a  = np.empty((capacity,), dtype=np.int64)
-        self.r  = np.empty((capacity,), dtype=np.float32)
-        self.s2 = np.empty((capacity, *obs_shape), dtype=dtype_obs)
-        self.mask = np.empty((capacity, num_actions), dtype=np.float32)
-        self.mask2 = np.empty((capacity, num_actions), dtype=np.float32)
-        self.done = np.empty((capacity,), dtype=bool)
-        self.size = 0
-        self.next = 0
-
-    def add(self, tr: c4.Transition) -> None:
-        i = self.next
-        self.s[i]  = tr.s
-        self.a[i]  = tr.a
-        self.r[i]  = tr.r
-        self.s2[i] = tr.s2
-        self.mask[i]  = tr.mask
-        self.mask2[i] = tr.mask2
-        self.done[i] = tr.done
-        self.next = (i + 1) % self.capacity
-        if self.size < self.capacity:
-            self.size += 1
-
-    def num_entries(self) -> int:
-        return self.size
-
-    def sample(self, batch_size):
-        idx = np.random.randint(0, self.size, size=batch_size)
-        return self.s[idx], self.a[idx], self.r[idx], self.s2[idx], self.mask[idx], self.mask2[idx], self.done[idx]
-
 
 import numpy as np
 import torch
@@ -439,11 +388,21 @@ def log_dqn_metrics(*, step: int,
 def l2_params(m): 
     return torch.sqrt(sum((p.detach()**2).sum() for p in m.parameters()))
 
+
+
+# Buffer options:
+#                  buffer_size: int = 10000,
+#         self.replay_buffer = TransitionReplayBuffer(buffer_size, qfunction.input_shape, qfunction.num_actions)
+
+
+
+# Create, push, sample, update
+
 class VanillaDQNTrainer(Trainer):
     def __init__(self, 
                  qfunction : QFunction, 
+                 replay_buffer: buffer.SimpleTransitionReplayBuffer | buffer.PERBuffer,
                  *, 
-                 buffer_size: int = 10000,
                  train_every: int = 1,
                  min_buffer_to_train: int = 1000,
                  batch_size: int = 32,
@@ -467,7 +426,7 @@ class VanillaDQNTrainer(Trainer):
         for p in self.target_qfunction.parameters():
             p.requires_grad = False
 
-        self.buffer_size = buffer_size
+        self.replay_buffer = replay_buffer
         self.train_every = train_every
         self.min_buffer_to_train = min_buffer_to_train
         self.batch_size = batch_size
@@ -481,14 +440,14 @@ class VanillaDQNTrainer(Trainer):
         self.model_saver = model_saver
         self.step_count = start_tick
         self.train_step_count = 0
-        self.replay_buffer = TransitionReplayBuffer(buffer_size, qfunction.input_shape, qfunction.num_actions)
+        ######################################## EDIT
         self.optimizer = optimizer if optimizer is not None else optim.Adam(self.qfunction.parameters(), lr=learning_rate)
         self.criterion = nn.SmoothL1Loss(beta=1.0, reduction='mean')
         self.writer = writer
         self.log_every = log_every
         self.recent_transition_rewards = utils.RecentValuesRingBuffer(size=100)
 
-        assert self.min_buffer_to_train <= self.buffer_size
+        assert self.min_buffer_to_train <= self.replay_buffer.capacity
         assert self.train_every > 0
         assert self.batch_size > 0
         assert self.gamma >= 0.0 and self.gamma <= 1.0
@@ -553,42 +512,56 @@ class VanillaDQNTrainer(Trainer):
             self._add_transition(tr)
 
     def _add_transition(self, tr: c4.Transition) -> None:
+        # Add to buffer
         self.replay_buffer.add(tr)
+
+        # Update history info for logging purposes
         if tr.r != 0.0:
             self.recent_transition_rewards.add(tr.r)
+
+        # Increment step count
         self.step_count += 1
+
+        # Log rewards
         if self.step_count % 50:
             self.writer.add_scalar("debug/recent_nonzero_transition_reward_avg", self.recent_transition_rewards.average_if_full(), self.step_count)
+        
+        # Train if it's time to
         if self.step_count > self.min_buffer_to_train and self.step_count % self.train_every == 0:
             self.train()
+        
+        # Save model if needed
         if self.step_count % self.save_every == 0:
             assert isinstance(self.qfunction, torch.nn.Module)
             self.model_saver.save_model(self.qfunction, self.step_count)
 
     def train(self) -> None:
         # Only train if we have enough samples
-        if self.replay_buffer.size < self.min_buffer_to_train:
+        if self.replay_buffer.num_entries() < self.min_buffer_to_train:
             return
         
         # Update train step count
         self.train_step_count += 1
 
-                        
         # Sample a batch
-        s_batch, a_batch, r_batch, s2_batch, mask_batch, mask2_batch, done_batch = self.replay_buffer.sample(self.batch_size)
-        s_batch = torch.from_numpy(s_batch).float().to(self.qfunction.device_)
-        a_batch = torch.from_numpy(a_batch).long().to(self.qfunction.device_)
-        r_batch = torch.from_numpy(r_batch).float().to(self.qfunction.device_)
-        s2_batch = torch.from_numpy(s2_batch).float().to(self.qfunction.device_)
-        mask2_batch = torch.from_numpy(mask2_batch).float().to(self.qfunction.device_)
-        done_batch = torch.from_numpy(done_batch).bool().to(self.qfunction.device_)
+        batch: dict[str, Any]
+        if isinstance(self.replay_buffer, buffer.SimpleTransitionReplayBuffer):
+            batch = self.replay_buffer.sample(self.batch_size)
+        elif isinstance(self.replay_buffer, buffer.PERBuffer):
+            batch = self.replay_buffer.sample(self.batch_size, self.train_step_count)
+
+        s_batch = torch.from_numpy(batch["s"]).float().to(self.qfunction.device_)
+        a_batch = torch.from_numpy(batch["a"]).long().to(self.qfunction.device_)
+        r_batch = torch.from_numpy(batch["r"]).float().to(self.qfunction.device_)
+        s2_batch = torch.from_numpy(batch["s2"]).float().to(self.qfunction.device_)
+        mask2_batch = torch.from_numpy(batch["mask2"]).float().to(self.qfunction.device_)
+        done_batch = torch.from_numpy(batch["done"]).bool().to(self.qfunction.device_)
         
         # Compute Q(s,a)
         q_values = self.qfunction(s_batch)  # (B, num_actions)
         q_s_a = q_values.gather(1, a_batch.unsqueeze(1)).squeeze(1)  # (B,)
 
         # Compute target Q values
-
         with torch.no_grad():
             q_next = self.target_qfunction(s2_batch)             # (B, A)
             if mask2_batch is not None:
@@ -602,6 +575,11 @@ class VanillaDQNTrainer(Trainer):
 
         # Compute loss
         loss = self.criterion(q_s_a, target_q)
+
+        # If prioritized replay, compute td errors to pass back for priority update
+        if isinstance(self.replay_buffer, buffer.PERBuffer):
+            td_errors = (q_s_a - target_q).detach().cpu().numpy()
+            self.replay_buffer.update_priorities(batch["idxs"], td_errors)
 
         # Optimize
         self.optimizer.zero_grad()
@@ -626,11 +604,11 @@ class VanillaDQNTrainer(Trainer):
             # Debug metrics: done and reward mean in batch, tick for target hard update
             self.writer.add_scalar("debug/done_mean",  done_batch.float().mean().item(), self.train_step_count)
             self.writer.add_scalar("debug/r_mean",     r_batch.mean().item(), self.train_step_count)
-            self.writer.add_scalar("debug/r_pct_neg",     (r_batch < -0.01).float().mean().item(), self.train_step_count)
-            self.writer.add_scalar("debug/r_pct_pos",     (r_batch > 0.01).float().mean().item(), self.train_step_count)
-            self.writer.add_scalar("debug/target_hard_update", int(self.train_step_count % self.target_update_every == 0), self.train_step_count)
-
-
+            #self.writer.add_scalar("debug/r_pct_neg",     (r_batch < -0.01).float().mean().item(), self.train_step_count)
+            #self.writer.add_scalar("debug/r_pct_pos",     (r_batch > 0.01).float().mean().item(), self.train_step_count)
+            #self.writer.add_scalar("debug/target_hard_update", int(self.train_step_count % self.target_update_every == 0), self.train_step_count)
+            if isinstance(self.replay_buffer, buffer.PERBuffer):
+                self.writer.add_scalar("debug/PER_beta", batch["beta"], self.train_step_count)
 
         # Logging
         if self.writer is not None and self.train_step_count % self.log_every == 0:
