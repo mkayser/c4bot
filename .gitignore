@@ -12,4 +12,5 @@ outputs/
 *.o
 *.so
 negamax_bb_tester
+negamax_bb_probe
 conf/extras
