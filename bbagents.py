@@ -125,7 +125,7 @@ class RandomizedNegamaxBBAgent(Agent):
     def act(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
         self.move_count += 1
 
-        if (self.switch_to_deterministic_after is not None) and self.move_count <= self.switch_to_deterministic_after:
+        if (self.switch_to_deterministic_after is None) or self.move_count <= self.switch_to_deterministic_after:
             choose_randomly = (self.rng.random() <= self.prob_of_random_move)
         else:
             choose_randomly = False

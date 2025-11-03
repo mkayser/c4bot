@@ -78,7 +78,7 @@ class RandomizedNegamaxBBAgentCfg:
     search_depth: int
     rng_seed: int
     prob_of_random_move: float
-    switch_to_deterministic_after: int
+    switch_to_deterministic_after: Optional[int]
 
 class QFunctionType(str, Enum):
     ResConvNetQFunction="ResConvNetQFunction"

@@ -55,13 +55,13 @@ class Res(nn.Module):
     def __init__(self, c_in, c_out, stride=1):
         super().__init__()
         self.f = nn.Sequential(
-            nn.Conv2d(c_in, c_out, 3, stride, 1, bias=False),
+            nn.Conv2d(c_in, c_out, 3, stride, 1, bias=True),
             nn.BatchNorm2d(c_out), 
             nn.ReLU(inplace=True),
-            nn.Conv2d(c_out, c_out, 3, 1, 1, bias=False),
+            nn.Conv2d(c_out, c_out, 3, 1, 1, bias=True),
             nn.BatchNorm2d(c_out),
         )
-        self.skip = nn.Identity() if (c_in==c_out and stride==1) else nn.Conv2d(c_in, c_out, 1, stride, bias=False)
+        self.skip = nn.Identity() if (c_in==c_out and stride==1) else nn.Conv2d(c_in, c_out, 1, stride, bias=True)
     def forward(self,x): return F.relu(self.f(x) + self.skip(x))
 
 

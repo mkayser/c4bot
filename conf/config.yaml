@@ -4,7 +4,7 @@ globals:
     type: ResConvNetQFunction
     input_shape: [2,6,7]
     num_actions: 7
-    load_from: null
+    load_from: ./checkpoints/trainboth/model.481000.pth
     device: cpu
   qagent: &qagent
     type: QAgent
@@ -12,7 +12,7 @@ globals:
     html_log_file: null
     html_log_max_games: null
     html_log_game_write_interval: null
-    debug_stream: null
+    debug_stream: stderr
     qfunction: { <<: *qfunction }
     action_picker: 
       type: EpsilonGreedyPicker
@@ -21,25 +21,29 @@ globals:
       writer_prefix: "agents/dqn/epsilon"
   game_runner_training: &game_runner_training
     play_every: 1
-    pinned_player: dqn
+    pinned_player: d6r00
     pinned_player_plays_first: null
     opponent_pool: 
       - d2r00
       - d2r10
       - d2r30
       - d2r50
-#      - d6r00
+#      - d4r00
+#      - d4r10
+#      - d4r30
+#      - d4r50
 #      - d6r10
 #      - d6r30
 #      - d6r50
     log_every: 100
     dump_games_every: 1000
-    dump_games_location: games/dqn-${globals.runid}
-    writer_prefix: games/dqn_train
+    dump_games_location: games/d6-${globals.runid}
+    writer_prefix: games/d6_train
     export_episodes: true
     export_opponent_episodes: false
   game_runner_validation: &game_runner_validation
     <<: *game_runner_training
+    pinned_player: dqn_greedy
     play_every: 10
     log_every: 10
     dump_games_every: 100
@@ -50,17 +54,20 @@ game_play_loop:
   max_ticks: 1000000
   rng_seed: 42
   game_runners:
-    - {<<: *game_runner_training}
-    - {<<: *game_runner_validation, opponent_pool: ["d2r00"], dump_games_location: games/dqn_d2r00, writer_prefix: games/dqn_d2r00}
-    - {<<: *game_runner_validation, opponent_pool: ["d2r10"], dump_games_location: games/dqn_d2r10, writer_prefix: games/dqn_d2r10}
-    - {<<: *game_runner_validation, opponent_pool: ["d2r30"], dump_games_location: games/dqn_d2r30, writer_prefix: games/dqn_d2r30}
-    - {<<: *game_runner_validation, opponent_pool: ["d2r50"], dump_games_location: games/dqn_d2r50, writer_prefix: games/dqn_d2r50}
-#    - {<<: *game_runner_validation, opponent_pool: ["d6r00"], dump_games_location: games/dqn_d6r00, writer_prefix: games/dqn_d6r00}
-#    - {<<: *game_runner_validation, opponent_pool: ["d6r10"], dump_games_location: games/dqn_d6r10, writer_prefix: games/dqn_d6r10}
-#    - {<<: *game_runner_validation, opponent_pool: ["d6r30"], dump_games_location: games/dqn_d6r30, writer_prefix: games/dqn_d6r30}
-#    - {<<: *game_runner_validation, opponent_pool: ["d6r50"], dump_games_location: games/dqn_d6r50, writer_prefix: games/dqn_d6r50}
+#    - {<<: *game_runner_training }
+#    - {<<: *game_runner_training, pinned_player: dqn, writer_prefix: games/dqn_train, dump_games_location: games/dqn-training }
+#    - {<<: *game_runner_validation, opponent_pool: ["d2r00"], dump_games_location: games/dqn_d2r00, writer_prefix: games/dqn_d2r00}
+#    - {<<: *game_runner_validation, opponent_pool: ["d2r10"], dump_games_location: games/dqn_d2r10, writer_prefix: games/dqn_d2r10}
+#    - {<<: *game_runner_validation, opponent_pool: ["d2r30"], dump_games_location: games/dqn_d2r30, writer_prefix: games/dqn_d2r30}
+#    - {<<: *game_runner_validation, opponent_pool: ["d2r50"], dump_games_location: games/dqn_d2r50, writer_prefix: games/dqn_d2r50}
+#    - {<<: *game_runner_validation, opponent_pool: ["d4r00"], dump_games_location: games/dqn_d4r00, writer_prefix: games/dqn_d4r00}
+#    - {<<: *game_runner_validation, opponent_pool: ["d4r10"], dump_games_location: games/dqn_d4r10, writer_prefix: games/dqn_d4r10}
+#    - {<<: *game_runner_validation, opponent_pool: ["d4r30"], dump_games_location: games/dqn_d4r30, writer_prefix: games/dqn_d4r30}
+#    - {<<: *game_runner_validation, opponent_pool: ["d4r50"], dump_games_location: games/dqn_d4r50, writer_prefix: games/dqn_d4r50}
+    - {<<: *game_runner_validation, opponent_pool: ["humanpygame"], dump_games_location: games/humanpygame, writer_prefix: games/humanpygame}
   players:
     random: {type: RandomAgent, rng_seed: 42}
+    humanpygame: {type: HumanPygameAgent}
     always0: {type: AlwaysPlayFixedColumnAgent, column: 0}
     always1: {type: AlwaysPlayFixedColumnAgent, column: 1}
     always2: {type: AlwaysPlayFixedColumnAgent, column: 2}
@@ -68,14 +75,18 @@ game_play_loop:
     always4: {type: AlwaysPlayFixedColumnAgent, column: 4}
     always5: {type: AlwaysPlayFixedColumnAgent, column: 5}
     always6: {type: AlwaysPlayFixedColumnAgent, column: 6}
-    d2r00: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.00, switch_to_deterministic_after: 8}
-    d2r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.10, switch_to_deterministic_after: 8}
-    d2r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.30, switch_to_deterministic_after: 8}
-    d2r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.50, switch_to_deterministic_after: 8}
-    d6r00: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.00, switch_to_deterministic_after: 8}
-    d6r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.10, switch_to_deterministic_after: 8}
-    d6r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.30, switch_to_deterministic_after: 8}
-    d6r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.50, switch_to_deterministic_after: 8}
+    d2r00: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.00, switch_to_deterministic_after: null}
+    d2r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.10, switch_to_deterministic_after: null}
+    d2r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.30, switch_to_deterministic_after: null}
+    d2r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 2, rng_seed: 42, prob_of_random_move: 0.50, switch_to_deterministic_after: null}
+    d4r00: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 4, rng_seed: 42, prob_of_random_move: 0.00, switch_to_deterministic_after: null}
+    d4r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 4, rng_seed: 42, prob_of_random_move: 0.10, switch_to_deterministic_after: null}
+    d4r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 4, rng_seed: 42, prob_of_random_move: 0.30, switch_to_deterministic_after: null}
+    d4r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 4, rng_seed: 42, prob_of_random_move: 0.50, switch_to_deterministic_after: null}
+    d6r00: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.00, switch_to_deterministic_after: null}
+    d6r10: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.10, switch_to_deterministic_after: null}
+    d6r30: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.30, switch_to_deterministic_after: null}
+    d6r50: {type: RandomizedNegamaxBBAgent, h: 6, w: 7, search_depth: 6, rng_seed: 42, prob_of_random_move: 0.50, switch_to_deterministic_after: null}
     dqn: { <<: *qagent }
     dqn_greedy:
       <<: *qagent
@@ -90,8 +101,8 @@ learner:
   qfunction: { <<: *qfunction, device: cuda }
   step_lengths: { 1: 1.0 }
   replay_buffer_size: 10000
-  use_prioritized_replay: True
-  PER_alpha: 0.99
+  use_prioritized_replay: False
+  PER_alpha: 0.6
   PER_beta_start: 0.3
   PER_beta_end: 1.0
   PER_beta_steps: 100000
