@@ -4,7 +4,7 @@ globals:
     type: ResConvNetQFunction
     input_shape: [2,6,7]
     num_actions: 7
-    load_from: ./checkpoints/trainboth/model.481000.pth
+    load_from: ./checkpoints/train.randomstarts2/model.638000.pth
     device: cpu
   qagent: &qagent
     type: QAgent
@@ -12,7 +12,7 @@ globals:
     html_log_file: null
     html_log_max_games: null
     html_log_game_write_interval: null
-    debug_stream: stderr
+    debug_stream: null
     qfunction: { <<: *qfunction }
     action_picker: 
       type: EpsilonGreedyPicker
@@ -23,11 +23,15 @@ globals:
     play_every: 1
     pinned_player: d6r00
     pinned_player_plays_first: null
+    allow_random_start_moves: true
+    max_random_start_moves: 10
     opponent_pool: 
       - d2r00
-      - d2r10
-      - d2r30
-      - d2r50
+      - d4r00
+#      - d6r00
+#      - d2r10
+#      - d2r30
+#      - d2r50
 #      - d4r00
 #      - d4r10
 #      - d4r30
@@ -44,6 +48,8 @@ globals:
   game_runner_validation: &game_runner_validation
     <<: *game_runner_training
     pinned_player: dqn_greedy
+    allow_random_start_moves: false
+    max_random_start_moves: null
     play_every: 10
     log_every: 10
     dump_games_every: 100
@@ -55,16 +61,16 @@ game_play_loop:
   rng_seed: 42
   game_runners:
 #    - {<<: *game_runner_training }
-#    - {<<: *game_runner_training, pinned_player: dqn, writer_prefix: games/dqn_train, dump_games_location: games/dqn-training }
-#    - {<<: *game_runner_validation, opponent_pool: ["d2r00"], dump_games_location: games/dqn_d2r00, writer_prefix: games/dqn_d2r00}
-#    - {<<: *game_runner_validation, opponent_pool: ["d2r10"], dump_games_location: games/dqn_d2r10, writer_prefix: games/dqn_d2r10}
-#    - {<<: *game_runner_validation, opponent_pool: ["d2r30"], dump_games_location: games/dqn_d2r30, writer_prefix: games/dqn_d2r30}
-#    - {<<: *game_runner_validation, opponent_pool: ["d2r50"], dump_games_location: games/dqn_d2r50, writer_prefix: games/dqn_d2r50}
-#    - {<<: *game_runner_validation, opponent_pool: ["d4r00"], dump_games_location: games/dqn_d4r00, writer_prefix: games/dqn_d4r00}
-#    - {<<: *game_runner_validation, opponent_pool: ["d4r10"], dump_games_location: games/dqn_d4r10, writer_prefix: games/dqn_d4r10}
-#    - {<<: *game_runner_validation, opponent_pool: ["d4r30"], dump_games_location: games/dqn_d4r30, writer_prefix: games/dqn_d4r30}
-#    - {<<: *game_runner_validation, opponent_pool: ["d4r50"], dump_games_location: games/dqn_d4r50, writer_prefix: games/dqn_d4r50}
-    - {<<: *game_runner_validation, opponent_pool: ["humanpygame"], dump_games_location: games/humanpygame, writer_prefix: games/humanpygame}
+    - {<<: *game_runner_training, pinned_player: dqn, writer_prefix: games/dqn_train, dump_games_location: games/dqn-training }
+    - {<<: *game_runner_validation, opponent_pool: ["d2r00"], dump_games_location: games/dqn_d2r00, writer_prefix: games/dqn_d2r00}
+    - {<<: *game_runner_validation, opponent_pool: ["d2r10"], dump_games_location: games/dqn_d2r10, writer_prefix: games/dqn_d2r10}
+    - {<<: *game_runner_validation, opponent_pool: ["d2r30"], dump_games_location: games/dqn_d2r30, writer_prefix: games/dqn_d2r30}
+    - {<<: *game_runner_validation, opponent_pool: ["d2r50"], dump_games_location: games/dqn_d2r50, writer_prefix: games/dqn_d2r50}
+    - {<<: *game_runner_validation, opponent_pool: ["d4r00"], dump_games_location: games/dqn_d4r00, writer_prefix: games/dqn_d4r00}
+    - {<<: *game_runner_validation, opponent_pool: ["d4r10"], dump_games_location: games/dqn_d4r10, writer_prefix: games/dqn_d4r10}
+    - {<<: *game_runner_validation, opponent_pool: ["d4r30"], dump_games_location: games/dqn_d4r30, writer_prefix: games/dqn_d4r30}
+    - {<<: *game_runner_validation, opponent_pool: ["d4r50"], dump_games_location: games/dqn_d4r50, writer_prefix: games/dqn_d4r50}
+#    - {<<: *game_runner_validation, opponent_pool: ["humanpygame"], dump_games_location: games/humanpygame, writer_prefix: games/humanpygame}
   players:
     random: {type: RandomAgent, rng_seed: 42}
     humanpygame: {type: HumanPygameAgent}
@@ -101,7 +107,7 @@ learner:
   qfunction: { <<: *qfunction, device: cuda }
   step_lengths: { 1: 1.0 }
   replay_buffer_size: 10000
-  use_prioritized_replay: False
+  use_prioritized_replay: True
   PER_alpha: 0.6
   PER_beta_start: 0.3
   PER_beta_end: 1.0

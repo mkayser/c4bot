@@ -108,6 +108,7 @@ def play_game(
     agent0: Agent,
     agent1: Agent,
     *,
+    num_random_start_moves: int = 0,
     render: bool = False,
     verbose: bool = False,
 ) -> Tuple[Any]:
@@ -136,6 +137,33 @@ def play_game(
     # Notify agents of game start
     agent0.start_game(P0)
     agent1.start_game(P1)
+
+    # Play random starting moves if requested
+    for _ in range(num_random_start_moves):
+        current_agent_id = env.agent_selection
+        current_agent = id_to_agent[current_agent_id]
+
+        s, action_mask, r, term, trunc, info = get_normalized_state(env.last())
+
+        if term or trunc:
+            return None, [], []  # game ended during random start moves
+
+        # Act randomly
+        legal_actions = np.nonzero(action_mask)[0]
+        action = np.random.choice(legal_actions)
+
+        # Step
+        env.step(int(action))
+
+        # Record
+        record.add_move(int(action))
+
+        if verbose:
+            print(f"[random start] {current_agent_id} plays {action}")
+            next_agent = env.agent_selection               # who moves next
+            next_obs = env.observe(next_agent)             # AEC API: get obs for any agent
+            print(c4_ansi_from_obs(next_obs))
+            print(f"\nAction: {action}\n")
 
     rewards = {P0: 0.0, P1: 0.0}
 
@@ -208,7 +236,8 @@ def play_game(
     # Let each agent observe the final board (this is mostly for interactivity/display purposes)
     
 
-
+    if len(transitions[P0]) == 0 or len(transitions[P1]) == 0:
+        return None, [], []
 
     # Game over; determine winner
     r0, r1 = rewards[P0], rewards[P1]
@@ -223,8 +252,8 @@ def play_game(
     agent0.end_game()
     agent1.end_game()
 
-    assert sum(item.r for item in transitions[P0]) == r0
-    assert sum(item.r for item in transitions[P1]) == r1
+    assert sum(item.r for item in transitions[P0]) == r0, f"Sum of transition rewards is {sum(item.r for item in transitions[P0])} but reward is {r0} "
+    assert sum(item.r for item in transitions[P1]) == r1, f"Sum of transition rewards is {sum(item.r for item in transitions[P1])} but reward is {r1} "
     assert abs(len(transitions[P0]) - len(transitions[P1])) <= 1
 
     return record, transitions[P0], transitions[P1]

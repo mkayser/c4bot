@@ -35,6 +35,8 @@ class GameRunnerCfg:
     pinned_player: str
     pinned_player_plays_first: Optional[bool]
     opponent_pool: List[str]
+    allow_random_start_moves: bool
+    max_random_start_moves: Optional[int]
     dump_games_every: Optional[int]
     dump_games_location: Optional[str]
     log_every: int
@@ -320,19 +322,25 @@ def game_play_loop(cfg: GamePlayLoopCfg,
         score: float
         game_length: int
         game_record: Tuple[str, str, int, List[int]]
+        num_random_start_moves = 0
+        if gr.cfg.allow_random_start_moves:
+            if gr.cfg.max_random_start_moves is not None:
+                num_random_start_moves = rng.integers(0, gr.cfg.max_random_start_moves + 1)
+            else:
+                num_random_start_moves = rng.integers(0, 5)  # default max 4 random moves
 
         if pinned_is_first:
-            result, episode, opponent_episode = c4.play_game(env, main_player, opponent)
+            result, episode, opponent_episode = c4.play_game(env, main_player, opponent, num_random_start_moves=num_random_start_moves)
+            if len(episode) == 0:
+                return
             score = 1.0 if result.winner == c4.C4GameRoles.P0 else 0.0
-            #reward_sum = 0.5 * (1.0 + sum(item.r for item in episode))
-            #assert score == reward_sum, f"Mismatched score: {score} expected but sum is {reward_sum} "
             game_length = float(result.game_length())
             game_record = [main_player_id, opponent_id, game_length, result.moves]
         else:
-            result, opponent_episode, episode = c4.play_game(env, opponent, main_player)
+            result, opponent_episode, episode = c4.play_game(env, opponent, main_player, num_random_start_moves=num_random_start_moves)
+            if len(episode) == 0:
+                return
             score = 1.0 if result.winner == c4.C4GameRoles.P1 else 0.0
-            #reward_sum = 0.5 * (1.0 + sum(item.r for item in episode))
-            #assert score == reward_sum, f"Mismatched score: {score} expected but sum is {reward_sum} "
             game_length = float(result.game_length())
             game_record = [opponent_id, main_player_id, game_length, result.moves]
         
